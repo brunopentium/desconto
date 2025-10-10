@@ -275,7 +275,10 @@ function apiGetSaldo(payload){
 // Lançar compra (respeita limites mensal/diário)
 function apiLancarCompra(payload){
   const lock = LockService.getScriptLock();
-  lock.tryLock(20000);
+  const locked = lock.tryLock(20000);
+  if (!locked) {
+    return { ok:false, msg:'Sistema temporariamente ocupado. Tente novamente.' };
+  }
   try {
     const token = String(payload.token || '');
     const operador = requireAuth(token);
@@ -318,14 +321,17 @@ function apiLancarCompra(payload){
   } catch (e) {
     return { ok:false, msg: e.message };
   } finally {
-    try { lock.releaseLock(); } catch(_) {}
+    try { if (locked) lock.releaseLock(); } catch(_) {}
   }
 }
 
 // Resgatar usa saldo elegível (já considera vencimentos)
 function apiResgatar(payload){
   const lock = LockService.getScriptLock();
-  lock.tryLock(20000);
+  const locked = lock.tryLock(20000);
+  if (!locked) {
+    return { ok:false, msg:'Sistema temporariamente ocupado. Tente novamente.' };
+  }
   try {
     const token = String(payload.token || '');
     const operador = requireAuth(token);
@@ -348,7 +354,7 @@ function apiResgatar(payload){
   } catch (e) {
     return { ok:false, msg: e.message };
   } finally {
-    try { lock.releaseLock(); } catch(_) {}
+    try { if (locked) lock.releaseLock(); } catch(_) {}
   }
 }
 
