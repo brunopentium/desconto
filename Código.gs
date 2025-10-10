@@ -275,7 +275,10 @@ function apiGetSaldo(payload){
 // Lançar compra (respeita limites mensal/diário)
 function apiLancarCompra(payload){
   const lock = LockService.getScriptLock();
-  lock.tryLock(20000);
+  const locked = lock.tryLock(20000);
+  if (!locked) {
+    return { ok:false, msg:'Sistema temporariamente ocupado. Tente novamente.' };
+  }
   try {
     const token = String(payload.token || '');
     const operador = requireAuth(token);
@@ -318,14 +321,17 @@ function apiLancarCompra(payload){
   } catch (e) {
     return { ok:false, msg: e.message };
   } finally {
-    try { lock.releaseLock(); } catch(_) {}
+    try { if (locked) lock.releaseLock(); } catch(_) {}
   }
 }
 
 // Resgatar usa saldo elegível (já considera vencimentos)
 function apiResgatar(payload){
   const lock = LockService.getScriptLock();
-  lock.tryLock(20000);
+  const locked = lock.tryLock(20000);
+  if (!locked) {
+    return { ok:false, msg:'Sistema temporariamente ocupado. Tente novamente.' };
+  }
   try {
     const token = String(payload.token || '');
     const operador = requireAuth(token);
@@ -348,7 +354,7 @@ function apiResgatar(payload){
   } catch (e) {
     return { ok:false, msg: e.message };
   } finally {
-    try { lock.releaseLock(); } catch(_) {}
+    try { if (locked) lock.releaseLock(); } catch(_) {}
   }
 }
 
@@ -550,47 +556,146 @@ function apiGetTopClientes(payload){
   try {
     const token = String(payload.token || '');
     requireAuth(token);
-    
+
     Logger.log('=== TOP Clientes: Iniciando ===');
-    
-    const custData = SHEET_CUSTOMERS.getDataRange().getValues();
-    const clientes = [];
-    
-    // Pula o header (linha 0)
-    for (let i = 1; i < custData.length; i++){
-      const row = custData[i];
-      const cpfBruto = row[0];
-      if (!cpfBruto) continue;
-      
-      const cpf = _normCPF(cpfBruto);
-      const nome = String(row[1] || '').trim();
-      const telefone = String(row[2] || '').trim();
 
-      // saldo válido agora
-      const saldoEleg = _saldoAtualElegivel_(cpf);
-      _setCustomerBalance(cpf, saldoEleg); // mantém espelho
+    const settings = _getSettings();
+    const hoje = new Date();
+    const tz = Session.getScriptTimeZone();
 
-      if (saldoEleg > 0) {
-        clientes.push({
-          cpf,
-          cpf_formatado: cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4'),
-          nome: nome || 'Cliente ' + cpf.substring(0, 3) + '...',
-          telefone: telefone || '-',
-          saldo: saldoEleg / 100, // reais
-          ultimo_uso: row[4] || ''
-        });
+    const txRows = SHEET_TX.getDataRange().getValues();
+    const saldoMap = {};
+    const ultimoUsoMap = {};
+
+    for (let i = 1; i < txRows.length; i++){
+      const row = txRows[i];
+      if (!row[0] || !row[2]) continue;
+
+      const tipo = String(row[1] || '').trim();
+      const cpf = _normCPF(row[2]);
+      if (!cpf) continue;
+
+      const valorCent = Number(row[3]) || 0;
+      const tsRaw = row[0];
+      const ts = tsRaw instanceof Date ? tsRaw : new Date(tsRaw);
+      if (!(ts instanceof Date) || isNaN(ts.getTime())) continue;
+
+      if (!saldoMap[cpf]) saldoMap[cpf] = 0;
+
+      if (!ultimoUsoMap[cpf] || ts > ultimoUsoMap[cpf]) {
+        ultimoUsoMap[cpf] = ts;
+      }
+
+      if (tipo === 'CREDITO'){
+        const expira = new Date(ts);
+        expira.setDate(expira.getDate() + settings.validade_dias);
+        if (hoje <= expira) {
+          saldoMap[cpf] += valorCent;
+        }
+      } else if (tipo === 'RESGATE' || tipo === 'AJUSTE'){
+        saldoMap[cpf] += valorCent;
       }
     }
-    
+
+    const lastRow = SHEET_CUSTOMERS.getLastRow();
+    const clientes = [];
+    const saldoUpdates = [];
+    const ultimoUsoUpdates = [];
+    const clienteMeta = {};
+
+    if (lastRow > 1){
+      const custData = SHEET_CUSTOMERS.getRange(2, 1, lastRow - 1, 6).getValues();
+
+      for (let i = 0; i < custData.length; i++){
+        const row = custData[i];
+        const cpfBruto = row[0];
+
+        if (!cpfBruto){
+          saldoUpdates.push([0]);
+          ultimoUsoUpdates.push(['']);
+          continue;
+        }
+
+        const cpf = _normCPF(cpfBruto);
+
+        const nome = String(row[1] || '').trim();
+        const telefone = String(row[2] || '').trim();
+        const saldoEleg = Math.max(0, saldoMap[cpf] || 0);
+        let ultimoUso = ultimoUsoMap[cpf];
+        if (!ultimoUso){
+          const rawUso = row[4];
+          if (rawUso instanceof Date && !isNaN(rawUso.getTime())){
+            ultimoUso = rawUso;
+          }
+        }
+
+        saldoUpdates.push([saldoEleg]);
+        ultimoUsoUpdates.push([ultimoUso instanceof Date ? new Date(ultimoUso) : '']);
+
+        clienteMeta[cpf] = {
+          nome,
+          telefone,
+          ultimoUso: ultimoUso instanceof Date ? new Date(ultimoUso) : null
+        };
+
+        if (saldoEleg > 0) {
+          const ultimoUsoFmt = ultimoUso instanceof Date
+            ? Utilities.formatDate(ultimoUso, tz, 'dd/MM/yyyy HH:mm')
+            : '';
+          clientes.push({
+            cpf,
+            cpf_formatado: cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4'),
+            nome: nome || 'Cliente ' + cpf.substring(0, 3) + '...',
+            telefone: telefone || '-',
+            saldo: saldoEleg / 100,
+            ultimo_uso: ultimoUsoFmt
+          });
+        }
+      }
+
+      if (saldoUpdates.length){
+        try {
+          SHEET_CUSTOMERS.getRange(2, 4, saldoUpdates.length, 1).setValues(saldoUpdates);
+        } catch (mirrorErr) {
+          Logger.log('Aviso: falha ao atualizar coluna saldo espelho: ' + mirrorErr.message);
+        }
+      }
+      if (ultimoUsoUpdates.length){
+        try {
+          SHEET_CUSTOMERS.getRange(2, 5, ultimoUsoUpdates.length, 1).setValues(ultimoUsoUpdates);
+        } catch (usoErr) {
+          Logger.log('Aviso: falha ao atualizar coluna ultimo_uso espelho: ' + usoErr.message);
+        }
+      }
+    }
+
+    Object.keys(saldoMap).forEach(cpf => {
+      if (clienteMeta[cpf]) return;
+      const saldoEleg = Math.max(0, saldoMap[cpf] || 0);
+      if (saldoEleg <= 0) return;
+
+      const ultimoUso = ultimoUsoMap[cpf];
+      const ultimoUsoFmt = ultimoUso instanceof Date
+        ? Utilities.formatDate(ultimoUso, tz, 'dd/MM/yyyy HH:mm')
+        : '';
+      clientes.push({
+        cpf,
+        cpf_formatado: cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4'),
+        nome: 'Cliente ' + cpf.substring(0, 3) + '...',
+        telefone: '-',
+        saldo: saldoEleg / 100,
+        ultimo_uso: ultimoUsoFmt
+      });
+    });
+
     Logger.log('Total clientes com saldo: ' + clientes.length);
-    
-    // Ordena por saldo (maior primeiro)
+
     clientes.sort((a, b) => b.saldo - a.saldo);
-    
+
     const top20 = clientes.slice(0, 20);
-    
+
     Logger.log('Retornando TOP ' + top20.length);
-    
+
     return { ok: true, clientes: top20 };
   } catch (e) {
     Logger.log('ERRO apiGetTopClientes: ' + e.message);

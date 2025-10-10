@@ -746,7 +746,8 @@
             
             if(!r || !r.ok){
               if (r && isSessionError(r)) { forceRelog(r.msg); return; }
-              tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--subtle)">Erro ao carregar clientes</td></tr>';
+              const msg = (r && r.msg) ? `Erro ao carregar clientes (${r.msg})` : 'Erro ao carregar clientes';
+              tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--subtle)">${msg}</td></tr>`;
               $('clientesContent').style.display='block';
               return;
             }
@@ -773,7 +774,8 @@
           .withFailureHandler(e=>{
             $('clientesLoading').style.display='none';
             const tbody = $('clientesTable').querySelector('tbody');
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--subtle)">Erro ao carregar clientes</td></tr>';
+            const msg = e && e.message ? `Erro ao carregar clientes (${e.message})` : 'Erro ao carregar clientes';
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--subtle)">${msg}</td></tr>`;
             $('clientesContent').style.display='block';
             if (isSessionError(e)) { forceRelog(); return; }
           })
