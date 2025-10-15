@@ -312,6 +312,7 @@
                     <th>Nome</th>
                     <th>Telefone</th>
                     <th>Saldo</th>
+                    <th>Último uso</th>
                     <th>Ações</th>
                   </tr>
                 </thead>
@@ -747,13 +748,13 @@
             if(!r || !r.ok){
               if (r && isSessionError(r)) { forceRelog(r.msg); return; }
               const msg = (r && r.msg) ? `Erro ao carregar clientes (${r.msg})` : 'Erro ao carregar clientes';
-              tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--subtle)">${msg}</td></tr>`;
+              tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--subtle)">${msg}</td></tr>`;
               $('clientesContent').style.display='block';
               return;
             }
-            
+
             if(!r.clientes || r.clientes.length === 0){
-              tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--subtle)">Nenhum cliente com saldo</td></tr>';
+              tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--subtle)">Nenhum cliente com saldo</td></tr>';
             } else {
               r.clientes.forEach(cli => {
                 const tr = document.createElement('tr');
@@ -762,6 +763,7 @@
                   <td>${cli.nome}</td>
                   <td>${cli.telefone || '-'}</td>
                   <td style="font-weight:700">R$ ${fmtBR(cli.saldo)}</td>
+                  <td>${cli.ultimo_uso || '-'}</td>
                   <td>
                     <button class="btn btn-ghost btn-small" onclick="verHistoricoCliente('${cli.cpf_formatado}')">Ver histórico</button>
                   </td>
@@ -775,7 +777,7 @@
             $('clientesLoading').style.display='none';
             const tbody = $('clientesTable').querySelector('tbody');
             const msg = e && e.message ? `Erro ao carregar clientes (${e.message})` : 'Erro ao carregar clientes';
-            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--subtle)">${msg}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--subtle)">${msg}</td></tr>`;
             $('clientesContent').style.display='block';
             if (isSessionError(e)) { forceRelog(); return; }
           })
