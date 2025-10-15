@@ -598,7 +598,7 @@ function apiGetTopClientes(payload){
     }
 
     const lastRow = SHEET_CUSTOMERS.getLastRow();
-    const clientes = [];
+    let clientes = [];
     const saldoUpdates = [];
     const ultimoUsoUpdates = [];
     const clienteMeta = {};
@@ -635,7 +635,8 @@ function apiGetTopClientes(payload){
         clienteMeta[cpf] = {
           nome,
           telefone,
-          ultimoUso: ultimoUso instanceof Date ? new Date(ultimoUso) : null
+          ultimoUso: ultimoUso instanceof Date ? new Date(ultimoUso) : null,
+          rowIndex: i
         };
 
         if (saldoEleg > 0) {
@@ -653,20 +654,6 @@ function apiGetTopClientes(payload){
         }
       }
 
-      if (saldoUpdates.length){
-        try {
-          SHEET_CUSTOMERS.getRange(2, 4, saldoUpdates.length, 1).setValues(saldoUpdates);
-        } catch (mirrorErr) {
-          Logger.log('Aviso: falha ao atualizar coluna saldo espelho: ' + mirrorErr.message);
-        }
-      }
-      if (ultimoUsoUpdates.length){
-        try {
-          SHEET_CUSTOMERS.getRange(2, 5, ultimoUsoUpdates.length, 1).setValues(ultimoUsoUpdates);
-        } catch (usoErr) {
-          Logger.log('Aviso: falha ao atualizar coluna ultimo_uso espelho: ' + usoErr.message);
-        }
-      }
     }
 
     Object.keys(saldoMap).forEach(cpf => {
@@ -687,6 +674,62 @@ function apiGetTopClientes(payload){
         ultimo_uso: ultimoUsoFmt
       });
     });
+
+    if (!clientes.length){
+      Logger.log('Aviso: nenhum cliente encontrado no primeiro passe, executando fallback com _saldoAtualElegivel_.');
+      const fallbackCpfs = new Set();
+      Object.keys(clienteMeta).forEach(cpf => { if (cpf) fallbackCpfs.add(cpf); });
+      Object.keys(saldoMap).forEach(cpf => { if (cpf) fallbackCpfs.add(cpf); });
+
+      const fallback = [];
+      fallbackCpfs.forEach(cpf => {
+        if (!cpf || /^0+$/.test(cpf)) return;
+        const saldoCent = Math.max(0, _saldoAtualElegivel_(cpf));
+        if (saldoCent <= 0) return;
+
+        let ultimoUso = (clienteMeta[cpf] && clienteMeta[cpf].ultimoUso) || ultimoUsoMap[cpf] || null;
+        const ultimoUsoFmt = ultimoUso instanceof Date
+          ? Utilities.formatDate(ultimoUso, tz, 'dd/MM/yyyy HH:mm')
+          : '';
+
+        const meta = clienteMeta[cpf] || {};
+        const nome = meta.nome || 'Cliente ' + cpf.substring(0, 3) + '...';
+        const telefone = meta.telefone || '-';
+
+        if (typeof meta.rowIndex === 'number'){
+          saldoUpdates[meta.rowIndex] = [saldoCent];
+          ultimoUsoUpdates[meta.rowIndex] = [ultimoUso instanceof Date ? new Date(ultimoUso) : ''];
+        }
+
+        fallback.push({
+          cpf,
+          cpf_formatado: cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4'),
+          nome,
+          telefone,
+          saldo: saldoCent / 100,
+          ultimo_uso: ultimoUsoFmt
+        });
+      });
+
+      if (fallback.length){
+        clientes = fallback;
+      }
+    }
+
+    if (saldoUpdates.length){
+      try {
+        SHEET_CUSTOMERS.getRange(2, 4, saldoUpdates.length, 1).setValues(saldoUpdates);
+      } catch (mirrorErr) {
+        Logger.log('Aviso: falha ao atualizar coluna saldo espelho: ' + mirrorErr.message);
+      }
+    }
+    if (ultimoUsoUpdates.length){
+      try {
+        SHEET_CUSTOMERS.getRange(2, 5, ultimoUsoUpdates.length, 1).setValues(ultimoUsoUpdates);
+      } catch (usoErr) {
+        Logger.log('Aviso: falha ao atualizar coluna ultimo_uso espelho: ' + usoErr.message);
+      }
+    }
 
     Logger.log('Total clientes com saldo: ' + clientes.length);
 
