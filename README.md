@@ -14,8 +14,8 @@ Este repositório contém o código completo do projeto Google Apps Script (arqu
 
 Você pode copiar e colar diretamente pelo navegador:
 
-1. Abra o arquivo desejado (`Código.gs` ou `index.html`) no GitHub.
-2. Clique em **Raw** para ver o conteúdo puro.
+1. Acesse a página do repositório no GitHub e, na lista de arquivos, clique em **Código.gs** ou **index.html**.
+2. Na parte superior direita do arquivo aberto, clique no botão **Raw** (Exibir bruto). O navegador mostrará apenas o texto puro.
 3. Pressione `Ctrl+A` (ou `Cmd+A` no macOS) para selecionar tudo, seguido de `Ctrl+C`/`Cmd+C` para copiar.
 4. Volte à IDE do Apps Script e use `Ctrl+V`/`Cmd+V` para substituir o conteúdo do arquivo correspondente.
 
