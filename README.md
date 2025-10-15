@@ -26,3 +26,12 @@ Os arquivos do repositório já estão atualizados com todas as correções disc
 ### Dica: se o GitHub apontar conflitos
 
 Caso o GitHub mostre avisos de conflito ao tentar fazer merge, basta abrir os arquivos `Código.gs` e `README.md` deste repositório e substituir **todo** o conteúdo correspondente na IDE do Apps Script. Os arquivos publicados aqui já estão sem marcadores de conflito (`<<<<<<<`, `=======`, `>>>>>>>`), portanto a cópia direta garante o estado correto do código.
+
+### Checklist rápido antes de publicar
+
+Para garantir que tudo foi copiado corretamente no Apps Script, revise rapidamente:
+
+1. **Arquivos** – Verifique se existem exatamente dois arquivos: `Código.gs` (Script) e `index.html` (HTML).
+2. **Busca por conflitos** – Use `Ctrl+F` para procurar por `<<<<<<<` ou `>>>>>>>` no editor. Não deve restar nenhum marcador de merge.
+3. **Funções principais** – Confirme que funções como `apiGetTopClientes`, `_saldoAtualElegivel_`, `apiBuscarClientes` e `lancar` aparecem no arquivo `.gs`.
+4. **Deploy** – Depois de salvar, execute rapidamente `testarTopClientes()` ou `testarLeituraDados()` para validar o acesso às planilhas antes de publicar a versão final.
