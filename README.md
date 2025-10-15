@@ -22,3 +22,7 @@ Você pode copiar e colar diretamente pelo navegador:
 Se preferir baixar o projeto, utilize **Code → Download ZIP** no GitHub, descompacte o arquivo e abra os arquivos localmente para copiar o conteúdo.
 
 Os arquivos do repositório já estão atualizados com todas as correções discutidas. Basta copiá-los na íntegra para o Apps Script.
+
+### Dica: se o GitHub apontar conflitos
+
+Caso o GitHub mostre avisos de conflito ao tentar fazer merge, basta abrir os arquivos `Código.gs` e `README.md` deste repositório e substituir **todo** o conteúdo correspondente na IDE do Apps Script. Os arquivos publicados aqui já estão sem marcadores de conflito (`<<<<<<<`, `=======`, `>>>>>>>`), portanto a cópia direta garante o estado correto do código.
