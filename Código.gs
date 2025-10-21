@@ -209,19 +209,23 @@ function _totaisCreditoMesDia_(cpf){
   return { mesCent, diaCent };
 }
 
-// Folgas que governam o crédito permitido agora
-function _limitesRestantesMesDia_(cpf){
+// Folgas que governam o crédito permitido agora.
+// Se "saldoElegOverride" for informado, evita recalcular o saldo elegível.
+function _limitesRestantesMesDia_(cpf, saldoElegOverride){
   const st = _getSettings();
-  const saldoEleg = _saldoAtualElegivel_(cpf);
+  const saldoEleg = (typeof saldoElegOverride === 'number') ? saldoElegOverride : _saldoAtualElegivel_(cpf);
+
+  const { mesCent, diaCent } = _totaisCreditoMesDia_(cpf);
 
   const tetoMesCent = Math.round(st.teto_por_cpf_mes * 100);
-  const restMesSaldo = Math.max(0, tetoMesCent - saldoEleg);
-
-  const { diaCent } = _totaisCreditoMesDia_(cpf);
   const tetoDiaCent = Math.round(st.teto_por_cpf_dia * 100);
+
+  const restantePorSaldo = Math.max(0, tetoMesCent - saldoEleg);
+  const restantePorHistorico = Math.max(0, tetoMesCent - mesCent);
+  const restCreditoMes = Math.min(restantePorSaldo, restantePorHistorico);
   const restDia = Math.max(0, tetoDiaCent - diaCent);
 
-  return { restMesSaldo, restDia };
+  return { restCreditoMes, restDia };
 }
 
 /** ============== AUTH API ============== **/
@@ -241,6 +245,7 @@ function apiChangePassword(payload){
   const username = String(payload.username || '');
   const newPass  = String(payload.newPassword || '');
   if (!sessUser || sessUser !== username) return { ok:false, msg:'Sessão inválida' };
+  if (newPass.length < 8) return { ok:false, msg:'Senha deve ter pelo menos 8 caracteres.' };
   return setNewPassword(username, newPass);
 }
 
@@ -260,14 +265,14 @@ function apiGetSaldo(payload){
   _getCustomer(cpf); // garante cadastro
   const saldoEleg = _saldoAtualElegivel_(cpf);
 
-  const { restMesSaldo, restDia } = _limitesRestantesMesDia_(cpf);
+  const { restCreditoMes, restDia } = _limitesRestantesMesDia_(cpf, saldoEleg);
   _setCustomerBalance(cpf, saldoEleg); // espelho
 
   return {
     ok:true,
     cpf,
     saldo: saldoEleg / 100,
-    limiteRestanteMes: restMesSaldo / 100,
+    limiteRestanteMes: restCreditoMes / 100,
     limiteRestanteDia: restDia / 100
   };
 }
@@ -295,11 +300,11 @@ function apiLancarCompra(payload){
     const tetoTransCent = Math.round(st.teto_por_transacao * 100);
     if (creditoCent > tetoTransCent) creditoCent = tetoTransCent;
 
-    const { restMesSaldo, restDia } = _limitesRestantesMesDia_(cpf);
-    let permitido = Math.min(restMesSaldo, restDia);
+    const { restCreditoMes, restDia } = _limitesRestantesMesDia_(cpf);
+    let permitido = Math.min(restCreditoMes, restDia);
 
     if (permitido <= 0){
-      const msg = restMesSaldo <= 0
+      const msg = restCreditoMes <= 0
         ? `Limite mensal de R$ ${st.teto_por_cpf_mes.toFixed(2)} já atingido para este CPF.`
         : `Limite diário de R$ ${st.teto_por_cpf_dia.toFixed(2)} já atingido para este CPF.`;
       return { ok:false, msg };
