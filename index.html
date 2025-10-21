@@ -381,6 +381,8 @@
 
         if (tab === 'dashboard') {
           carregarDashboard();
+        } else if (tab === 'clientes' && !clientesCarregados) {
+          gerarRelatorioClientes();
         }
       }
 
@@ -596,49 +598,56 @@
         tbody.innerHTML = '';
         if (btn) btn.disabled = true;
 
-        google.script.run
-          .withSuccessHandler(r => {
-            if (btn) btn.disabled = false;
-            if(!r.ok){
-              status.textContent = r.msg || 'Falha ao gerar relatório.';
-              toast(r.msg || 'Erro ao gerar relatório', false);
-              return;
-            }
+        try {
+          google.script.run
+            .withSuccessHandler(r => {
+              if (btn) btn.disabled = false;
+              if(!r.ok){
+                status.textContent = r.msg || 'Falha ao gerar relatório.';
+                toast(r.msg || 'Erro ao gerar relatório', false);
+                return;
+              }
 
-            const clientes = Array.isArray(r.clientes) ? r.clientes : [];
-            if (!clientes.length){
-              status.textContent = '';
-              emptyState.style.display = 'block';
+              const clientes = Array.isArray(r.clientes) ? r.clientes : [];
+              if (!clientes.length){
+                status.textContent = '';
+                emptyState.style.display = 'block';
+                clientesCarregados = true;
+                return;
+              }
+
+              clientes.forEach((cli, idx) => {
+                const tr = document.createElement('tr');
+                const saldoFmt = 'R$ ' + fmtBR(cli.saldo || 0);
+                const ultimoUsoFmt = fmtDataHoraBR(cli.ultimo_uso);
+                tr.innerHTML = `
+                  <td>${idx + 1}</td>
+                  <td>${cli.cpf_formatado || cli.cpf}</td>
+                  <td>${cli.nome || '-'}</td>
+                  <td>${cli.telefone || '-'}</td>
+                  <td>${saldoFmt}</td>
+                  <td>${ultimoUsoFmt}</td>
+                `;
+                tbody.appendChild(tr);
+              });
+
+              status.textContent = `Total de clientes: ${clientes.length}`;
+              wrap.style.display = 'block';
               clientesCarregados = true;
-              return;
-            }
-
-            clientes.forEach((cli, idx) => {
-              const tr = document.createElement('tr');
-              const saldoFmt = 'R$ ' + fmtBR(cli.saldo || 0);
-              const ultimoUsoFmt = fmtDataHoraBR(cli.ultimo_uso);
-              tr.innerHTML = `
-                <td>${idx + 1}</td>
-                <td>${cli.cpf_formatado || cli.cpf}</td>
-                <td>${cli.nome || '-'}</td>
-                <td>${cli.telefone || '-'}</td>
-                <td>${saldoFmt}</td>
-                <td>${ultimoUsoFmt}</td>
-              `;
-              tbody.appendChild(tr);
-            });
-
-            status.textContent = `Total de clientes: ${clientes.length}`;
-            wrap.style.display = 'block';
-            clientesCarregados = true;
-          })
-          .withFailureHandler(e => {
-            if (btn) btn.disabled = false;
-            status.textContent = 'Erro ao gerar relatório.';
-            if (isSessionError(e)) { forceRelog('Sua sessão expirou.'); return; }
-            toast('Erro ao gerar relatório', false);
-          })
-          .apiGetClientesRelatorio({ token: TOKEN });
+            })
+            .withFailureHandler(e => {
+              if (btn) btn.disabled = false;
+              status.textContent = 'Erro ao gerar relatório.';
+              if (isSessionError(e)) { forceRelog('Sua sessão expirou.'); return; }
+              toast('Erro ao gerar relatório', false);
+            })
+            .apiGetClientesRelatorio({ token: TOKEN });
+        } catch(err) {
+          if (btn) btn.disabled = false;
+          status.textContent = 'Erro ao gerar relatório.';
+          toast('Erro ao gerar relatório', false);
+          console.error('Falha ao iniciar geração do relatório:', err);
+        }
       }
 
     </script>
