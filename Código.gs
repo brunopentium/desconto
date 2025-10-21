@@ -644,11 +644,17 @@ function apiGetTopClientes(payload){
       }
     }
 
-    if (saldoUpdates.length){
-      SHEET_CUSTOMERS.getRange(2, 4, saldoUpdates.length, 1).setValues(saldoUpdates);
-    }
-    if (ultimoUsoUpdates.length){
-      SHEET_CUSTOMERS.getRange(2, 5, ultimoUsoUpdates.length, 1).setValues(ultimoUsoUpdates);
+    if (saldoUpdates.length || ultimoUsoUpdates.length){
+      try {
+        if (saldoUpdates.length){
+          SHEET_CUSTOMERS.getRange(2, 4, saldoUpdates.length, 1).setValues(saldoUpdates);
+        }
+        if (ultimoUsoUpdates.length){
+          SHEET_CUSTOMERS.getRange(2, 5, ultimoUsoUpdates.length, 1).setValues(ultimoUsoUpdates);
+        }
+      } catch (syncErr) {
+        Logger.log('Aviso: falha ao sincronizar espelho de clientes: ' + syncErr.message);
+      }
     }
 
     Logger.log('Total clientes com saldo: ' + clientes.length);
