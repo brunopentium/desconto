@@ -150,8 +150,6 @@
       <div class="tabs">
         <div class="tab active" onclick="switchTab('operacoes')">Operações</div>
         <div class="tab" onclick="switchTab('dashboard')">Dashboard</div>
-        <div class="tab" onclick="switchTab('historico')">Histórico</div>
-        <div class="tab" onclick="switchTab('clientes')">Clientes</div>
       </div>
 
       <!-- TAB: OPERAÇÕES -->
@@ -255,72 +253,6 @@
         </div>
       </div>
 
-      <!-- TAB: HISTÓRICO -->
-      <div id="tabHistorico" class="tab-content" style="display:none">
-        <div class="card card-full">
-          <h3>Histórico de Transações</h3>
-          <label>Buscar por CPF</label>
-          <input id="cpfHistorico" placeholder="Digite CPF para buscar" inputmode="numeric" />
-          <button class="btn btn-ghost" style="margin-top:8px" onclick="buscarHistorico()">Buscar Histórico</button>
-          
-          <div id="histLoading" class="loading" style="display:none">Carregando...</div>
-          <div id="histContent" style="display:none">
-            <div style="margin:16px 0; padding:12px; background:#0b221e; border-radius:12px">
-              <div style="font-size:14px; color:var(--subtle)">Cliente: <span id="histNome" style="color:var(--text); font-weight:600"></span></div>
-              <div style="font-size:14px; color:var(--subtle); margin-top:4px">CPF: <span id="histCpf" style="color:var(--gold)"></span></div>
-              <div style="font-size:18px; font-weight:700; color:var(--gold); margin-top:8px">Saldo: R$ <span id="histSaldo">0,00</span></div>
-            </div>
-            
-            <div class="table-wrap">
-              <table id="histTable">
-                <thead>
-                  <tr>
-                    <th>Data</th>
-                    <th>Tipo</th>
-                    <th>Valor</th>
-                    <th>Compra</th>
-                    <th>Operador</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-            </div>
-          </div>
-          <div id="histEmpty" style="display:none; text-align:center; padding:20px; color:var(--subtle)">
-            Digite um CPF para ver o histórico
-          </div>
-        </div>
-      </div>
-
-      <!-- TAB: CLIENTES -->
-      <div id="tabClientes" class="tab-content" style="display:none">
-        <div class="card card-full">
-          <h3>Clientes com Saldo</h3>
-          <label>Buscar cliente</label>
-          <input id="buscaCliente" placeholder="Digite CPF ou nome (mín. 3 caracteres)" />
-          <div id="searchResults" class="search-results" style="display:none"></div>
-          
-          <button class="btn btn-ghost" style="margin-top:12px" onclick="carregarTopClientes()">Ver TOP 20 com Maior Saldo</button>
-          
-          <div id="clientesLoading" class="loading" style="display:none">Carregando...</div>
-          <div id="clientesContent" style="display:none">
-            <div class="table-wrap">
-              <table id="clientesTable">
-                <thead>
-                  <tr>
-                    <th>CPF</th>
-                    <th>Nome</th>
-                    <th>Telefone</th>
-                    <th>Saldo</th>
-                    <th>Ações</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- MODAL -->
@@ -391,28 +323,14 @@
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
         document.querySelectorAll('.tab-content').forEach(tc => tc.style.display = 'none');
         
+        const tabs = document.querySelectorAll('.tab');
         if (tab === 'operacoes') {
-          document.querySelectorAll('.tab')[0].classList.add('active');
+          tabs[0].classList.add('active');
           $('tabOperacoes').style.display = 'block';
         } else if (tab === 'dashboard') {
-          document.querySelectorAll('.tab')[1].classList.add('active');
+          tabs[1].classList.add('active');
           $('tabDashboard').style.display = 'block';
           carregarDashboard();
-        } else if (tab === 'historico') {
-          document.querySelectorAll('.tab')[2].classList.add('active');
-          $('tabHistorico').style.display = 'block';
-          $('histEmpty').style.display = 'block';
-          // Enter no campo CPF dispara busca
-          const el = $('cpfHistorico');
-          if (!el._enterBound){
-            el._enterBound = true;
-            el.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); buscarHistorico(); } });
-          }
-        } else if (tab === 'clientes') {
-          document.querySelectorAll('.tab')[3].classList.add('active');
-          $('tabClientes').style.display = 'block';
-          // carrega automaticamente o TOP 20
-          carregarTopClientes();
         }
       }
 
@@ -430,12 +348,9 @@
 
       // Session restore
       (function init(){
-        ['cpfSaldo','cpfCompra','cpfResgatar','cpfHistorico'].forEach(attachCpfMask);
+        ['cpfSaldo','cpfCompra','cpfResgatar'].forEach(attachCpfMask);
         ['valorCompra','valorResgatar'].forEach(attachMoneyMask);
-        
-        // Busca de clientes em tempo real
-        $('buscaCliente').addEventListener('input', debounce(buscarClientesAoDigitar, 300));
-        
+
         const t = localStorage.getItem('cb_token'), u = localStorage.getItem('cb_user');
         if (t && u){ TOKEN=t; CURRENT_USER=u; $('who').textContent='Operador: '+CURRENT_USER; showApp(); }
         else { showLogin(); }
@@ -618,174 +533,6 @@
           .apiGetDashboard({ token: TOKEN });
       }
 
-      // ======== Histórico ========
-      function buscarHistorico(){
-        const cpf = onlyDigits($('cpfHistorico').value);
-        if(!cpf || cpf.length < 11){ toast('Digite um CPF completo', false); return; }
-        
-        $('histLoading').style.display='block';
-        $('histContent').style.display='none';
-        $('histEmpty').style.display='none';
-        
-        google.script.run
-          .withSuccessHandler(r=>{
-            $('histLoading').style.display='none';
-            if(!r.ok){
-              if (isSessionError(r)) { forceRelog(r.msg); return; }
-              toast(r.msg || 'Erro ao buscar histórico', false); 
-              $('histEmpty').style.display='block';
-              return;
-            }
-            
-            $('histNome').textContent = r.nome || 'Sem nome';
-            $('histCpf').textContent = cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
-            $('histSaldo').textContent = fmtBR(r.saldoAtual);
-            
-            const tbody = $('histTable').querySelector('tbody');
-            tbody.innerHTML = '';
-            
-            if(r.historico.length === 0){
-              tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--subtle)">Nenhuma transação encontrada</td></tr>';
-            } else {
-              r.historico.forEach(tx => {
-                const tr = document.createElement('tr');
-                const data = new Date(tx.data);
-                const dataFmt = data.toLocaleDateString('pt-BR') + ' ' + data.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'});
-                
-                let badgeClass = 'badge-credit';
-                if(tx.tipo === 'RESGATE') badgeClass = 'badge-resgate';
-                if(tx.tipo === 'AJUSTE') badgeClass = 'badge-ajuste';
-                
-                const valorFmt = tx.valor >= 0 ? '+R$ ' + fmtBR(tx.valor) : '-R$ ' + fmtBR(Math.abs(tx.valor));
-                const compraFmt = tx.valorCompra ? 'R$ ' + fmtBR(tx.valorCompra) : '-';
-                
-                tr.innerHTML = `
-                  <td>${dataFmt}</td>
-                  <td><span class="badge ${badgeClass}">${tx.tipo}</span></td>
-                  <td style="font-weight:600">${valorFmt}</td>
-                  <td>${compraFmt}</td>
-                  <td>${tx.operador}</td>
-                `;
-                tbody.appendChild(tr);
-              });
-            }
-            
-            $('histContent').style.display='block';
-          })
-          .withFailureHandler(e=>{
-            $('histLoading').style.display='none';
-            if (isSessionError(e)) { forceRelog(); return; }
-            toast('Erro ao buscar histórico', false);
-            $('histEmpty').style.display='block';
-          })
-          .apiGetHistorico({ token: TOKEN, cpf });
-      }
-
-      // ======== Clientes ========
-      function buscarClientesAoDigitar(){
-        const termo = $('buscaCliente').value.trim();
-        
-        if(termo.length < 3){
-          $('searchResults').style.display='none';
-          $('clientesContent').style.display='none';
-          return;
-        }
-        
-        google.script.run
-          .withSuccessHandler(r=>{
-            if(!r.ok){
-              if (isSessionError(r)) { forceRelog(r.msg); return; }
-              return;
-            }
-            
-            const results = $('searchResults');
-            results.innerHTML = '';
-            
-            if(r.clientes.length === 0){
-              results.innerHTML = '<div style="padding:10px; text-align:center; color:var(--subtle)">Nenhum cliente encontrado</div>';
-              results.style.display='block';
-              return;
-            }
-            
-            r.clientes.forEach(cli => {
-              const div = document.createElement('div');
-              div.className = 'search-item';
-              div.innerHTML = `
-                <div class="search-cpf">${cli.cpf_formatado}</div>
-                <div class="search-nome">${cli.nome}</div>
-                <div class="search-saldo">Saldo: R$ ${fmtBR(cli.saldo)}</div>
-              `;
-              div.onclick = () => {
-                $('cpfHistorico').value = cli.cpf_formatado;
-                $('buscaCliente').value = '';
-                $('searchResults').style.display='none';
-                switchTab('historico');
-                setTimeout(() => buscarHistorico(), 100);
-              };
-              results.appendChild(div);
-            });
-            
-            results.style.display='block';
-          })
-          .withFailureHandler(e=>{
-            if (isSessionError(e)) { forceRelog(); return; }
-          })
-          .apiBuscarClientes({ token: TOKEN, termo });
-      }
-
-      function carregarTopClientes(){
-        $('clientesLoading').style.display='block';
-        $('clientesContent').style.display='none';
-        $('searchResults').style.display='none';
-        
-        google.script.run
-          .withSuccessHandler(r=>{
-            $('clientesLoading').style.display='none';
-            const tbody = $('clientesTable').querySelector('tbody');
-            tbody.innerHTML = '';
-            
-            if(!r || !r.ok){
-              if (r && isSessionError(r)) { forceRelog(r.msg); return; }
-              tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--subtle)">Erro ao carregar clientes</td></tr>';
-              $('clientesContent').style.display='block';
-              return;
-            }
-            
-            if(!r.clientes || r.clientes.length === 0){
-              tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--subtle)">Nenhum cliente com saldo</td></tr>';
-            } else {
-              r.clientes.forEach(cli => {
-                const tr = document.createElement('tr');
-                tr.innerHTML = `
-                  <td style="color:var(--gold); font-weight:600">${cli.cpf_formatado}</td>
-                  <td>${cli.nome}</td>
-                  <td>${cli.telefone || '-'}</td>
-                  <td style="font-weight:700">R$ ${fmtBR(cli.saldo)}</td>
-                  <td>
-                    <button class="btn btn-ghost btn-small" onclick="verHistoricoCliente('${cli.cpf_formatado}')">Ver histórico</button>
-                  </td>
-                `;
-                tbody.appendChild(tr);
-              });
-            }
-            $('clientesContent').style.display='block';
-          })
-          .withFailureHandler(e=>{
-            $('clientesLoading').style.display='none';
-            const tbody = $('clientesTable').querySelector('tbody');
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--subtle)">Erro ao carregar clientes</td></tr>';
-            $('clientesContent').style.display='block';
-            if (isSessionError(e)) { forceRelog(); return; }
-          })
-          .apiGetTopClientes({ token: TOKEN });
-      }
-
-      function verHistoricoCliente(cpf){
-        $('cpfHistorico').value = cpf;
-        $('buscaCliente').value = '';
-        switchTab('historico');
-        setTimeout(() => buscarHistorico(), 100);
-      }
     </script>
   </body>
 </html>
