@@ -382,6 +382,10 @@
         if (tab === 'dashboard') {
           carregarDashboard();
         }
+
+        if (tab === 'clientes' && !clientesCarregados) {
+          gerarRelatorioClientes();
+        }
       }
 
       // Helpers de sessão no front
