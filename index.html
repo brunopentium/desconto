@@ -684,18 +684,10 @@
       // ======== Clientes ========
       function buscarClientesAoDigitar(){
         const termo = $('buscaCliente').value.trim();
-
+        
         if(termo.length < 3){
           $('searchResults').style.display='none';
-
-          const content = $('clientesContent');
-          const hasData = content && content.dataset && content.dataset.hasData === '1';
-
-          if (hasData){
-            content.style.display = 'block';
-          } else if (!isVisible($('clientesLoading'))){
-            carregarTopClientes();
-          }
+          $('clientesContent').style.display='none';
           return;
         }
         
@@ -756,10 +748,9 @@
               if (r && isSessionError(r)) { forceRelog(r.msg); return; }
               tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--subtle)">Erro ao carregar clientes</td></tr>';
               $('clientesContent').style.display='block';
-              $('clientesContent').dataset.hasData = '1';
               return;
             }
-
+            
             if(!r.clientes || r.clientes.length === 0){
               tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--subtle)">Nenhum cliente com saldo</td></tr>';
             } else {
@@ -778,14 +769,12 @@
               });
             }
             $('clientesContent').style.display='block';
-            $('clientesContent').dataset.hasData = '1';
           })
           .withFailureHandler(e=>{
             $('clientesLoading').style.display='none';
             const tbody = $('clientesTable').querySelector('tbody');
             tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--subtle)">Erro ao carregar clientes</td></tr>';
             $('clientesContent').style.display='block';
-            $('clientesContent').dataset.hasData = '1';
             if (isSessionError(e)) { forceRelog(); return; }
           })
           .apiGetTopClientes({ token: TOKEN });
