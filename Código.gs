@@ -622,7 +622,11 @@ function apiGetTopClientes(payload){
 
       const nome = String(row[1] || '').trim();
       const telefone = String(row[2] || '').trim();
-      const saldoEleg = Math.max(0, Number(saldoMap[cpf] || 0));
+
+      const temSaldoCalculado = Object.prototype.hasOwnProperty.call(saldoMap, cpf);
+      const saldoPlanilha = Number(row[3]) || 0;
+      const saldoEleg = Math.max(0, temSaldoCalculado ? Number(saldoMap[cpf]) || 0 : saldoPlanilha);
+
       let ultimoUso = ultimoUsoMap[cpf];
       if (!ultimoUso){
         const rawUso = row[4];
