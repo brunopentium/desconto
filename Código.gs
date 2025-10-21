@@ -556,6 +556,112 @@ function apiBuscarClientes(payload){
   }
 }
 
+function _coletarClientesComSaldo_(opcoes){
+  const incluirZeros = !!(opcoes && opcoes.incluirZeros);
+
+  const settings = _getSettings();
+  const validadeDias = Number(settings.validade_dias || 0);
+  const validadeSegura = Number.isFinite(validadeDias) ? validadeDias : 0;
+  const hoje = new Date();
+
+  const txRows = SHEET_TX.getDataRange().getValues();
+  const saldoMap = {};
+  const ultimoUsoMap = {};
+
+  for (let i = 1; i < txRows.length; i++){
+    const row = txRows[i];
+    if (!row[0] || !row[2]) continue;
+
+    const tipo = String(row[1] || '').trim();
+    const cpf = _normCPF(row[2]);
+    if (!cpf) continue;
+
+    const valorCent = Number(row[3]);
+    const tsRaw = row[0];
+    const ts = tsRaw instanceof Date ? tsRaw : new Date(tsRaw);
+    if (!Number.isFinite(valorCent) || !(ts instanceof Date) || isNaN(ts.getTime())) continue;
+
+    if (!saldoMap[cpf]) saldoMap[cpf] = 0;
+
+    if (!ultimoUsoMap[cpf] || ts > ultimoUsoMap[cpf]) {
+      ultimoUsoMap[cpf] = ts;
+    }
+
+    if (tipo === 'CREDITO'){
+      const expira = new Date(ts);
+      expira.setDate(expira.getDate() + validadeSegura);
+      if (!isNaN(expira.getTime()) && hoje <= expira) {
+        saldoMap[cpf] += valorCent;
+      }
+    } else if (tipo === 'RESGATE' || tipo === 'AJUSTE'){
+      saldoMap[cpf] += valorCent;
+    }
+  }
+
+  const custData = SHEET_CUSTOMERS.getDataRange().getValues();
+  const clientes = [];
+  const saldoUpdates = [];
+  const ultimoUsoUpdates = [];
+
+  for (let i = 1; i < custData.length; i++){
+    const row = custData[i];
+    const cpfBruto = row[0];
+
+    if (!cpfBruto){
+      saldoUpdates.push([0]);
+      ultimoUsoUpdates.push(['']);
+      continue;
+    }
+
+    const cpf = _normCPF(cpfBruto);
+
+    const nome = String(row[1] || '').trim();
+    const telefone = String(row[2] || '').trim();
+
+    const temSaldoCalculado = Object.prototype.hasOwnProperty.call(saldoMap, cpf);
+    const saldoPlanilha = Number(row[3]) || 0;
+    const saldoEleg = Math.max(0, temSaldoCalculado ? Number(saldoMap[cpf]) || 0 : saldoPlanilha);
+
+    let ultimoUso = ultimoUsoMap[cpf];
+    if (!ultimoUso){
+      const rawUso = row[4];
+      if (rawUso instanceof Date && !isNaN(rawUso.getTime())){
+        ultimoUso = rawUso;
+      }
+    }
+
+    saldoUpdates.push([saldoEleg]);
+    ultimoUsoUpdates.push([ultimoUso || '']);
+
+    if (incluirZeros || saldoEleg > 0) {
+      clientes.push({
+        cpf,
+        cpf_formatado: cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4'),
+        nome: nome || 'Cliente ' + cpf.substring(0, 3) + '...',
+        telefone: telefone || '-',
+        saldo: saldoEleg / 100,
+        ultimo_uso: ultimoUso || ''
+      });
+    }
+  }
+
+  if (saldoUpdates.length || ultimoUsoUpdates.length){
+    try {
+      if (saldoUpdates.length){
+        SHEET_CUSTOMERS.getRange(2, 4, saldoUpdates.length, 1).setValues(saldoUpdates);
+      }
+      if (ultimoUsoUpdates.length){
+        SHEET_CUSTOMERS.getRange(2, 5, ultimoUsoUpdates.length, 1).setValues(ultimoUsoUpdates);
+      }
+    } catch (syncErr) {
+      Logger.log('Aviso: falha ao sincronizar espelho de clientes: ' + syncErr.message);
+    }
+  }
+
+  clientes.sort((a, b) => b.saldo - a.saldo);
+  return clientes;
+}
+
 // >>> AJUSTADO: TOP clientes calculando saldo DINÂMICO e atualizando espelho
 function apiGetTopClientes(payload){
   try {
@@ -564,108 +670,8 @@ function apiGetTopClientes(payload){
 
     Logger.log('=== TOP Clientes: Iniciando ===');
 
-    const settings = _getSettings();
-    const validadeDias = Number(settings.validade_dias || 0);
-    const validadeSegura = Number.isFinite(validadeDias) ? validadeDias : 0;
-    const hoje = new Date();
-
-    const txRows = SHEET_TX.getDataRange().getValues();
-    const saldoMap = {};
-    const ultimoUsoMap = {};
-
-    for (let i = 1; i < txRows.length; i++){
-      const row = txRows[i];
-      if (!row[0] || !row[2]) continue;
-
-      const tipo = String(row[1] || '').trim();
-      const cpf = _normCPF(row[2]);
-      if (!cpf) continue;
-
-      const valorCent = Number(row[3]);
-      const tsRaw = row[0];
-      const ts = tsRaw instanceof Date ? tsRaw : new Date(tsRaw);
-      if (!Number.isFinite(valorCent) || !(ts instanceof Date) || isNaN(ts.getTime())) continue;
-
-      if (!saldoMap[cpf]) saldoMap[cpf] = 0;
-
-      if (!ultimoUsoMap[cpf] || ts > ultimoUsoMap[cpf]) {
-        ultimoUsoMap[cpf] = ts;
-      }
-
-      if (tipo === 'CREDITO'){
-        const expira = new Date(ts);
-        expira.setDate(expira.getDate() + validadeSegura);
-        if (!isNaN(expira.getTime()) && hoje <= expira) {
-          saldoMap[cpf] += valorCent;
-        }
-      } else if (tipo === 'RESGATE' || tipo === 'AJUSTE'){
-        saldoMap[cpf] += valorCent;
-      }
-    }
-
-    const custData = SHEET_CUSTOMERS.getDataRange().getValues();
-    const clientes = [];
-    const saldoUpdates = [];
-    const ultimoUsoUpdates = [];
-
-    for (let i = 1; i < custData.length; i++){
-      const row = custData[i];
-      const cpfBruto = row[0];
-
-      if (!cpfBruto){
-        saldoUpdates.push([0]);
-        ultimoUsoUpdates.push(['']);
-        continue;
-      }
-
-      const cpf = _normCPF(cpfBruto);
-
-      const nome = String(row[1] || '').trim();
-      const telefone = String(row[2] || '').trim();
-
-      const temSaldoCalculado = Object.prototype.hasOwnProperty.call(saldoMap, cpf);
-      const saldoPlanilha = Number(row[3]) || 0;
-      const saldoEleg = Math.max(0, temSaldoCalculado ? Number(saldoMap[cpf]) || 0 : saldoPlanilha);
-
-      let ultimoUso = ultimoUsoMap[cpf];
-      if (!ultimoUso){
-        const rawUso = row[4];
-        if (rawUso instanceof Date && !isNaN(rawUso.getTime())){
-          ultimoUso = rawUso;
-        }
-      }
-
-      saldoUpdates.push([saldoEleg]);
-      ultimoUsoUpdates.push([ultimoUso || '']);
-
-      if (saldoEleg > 0) {
-        clientes.push({
-          cpf,
-          cpf_formatado: cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4'),
-          nome: nome || 'Cliente ' + cpf.substring(0, 3) + '...',
-          telefone: telefone || '-',
-          saldo: saldoEleg / 100,
-          ultimo_uso: ultimoUso || ''
-        });
-      }
-    }
-
-    if (saldoUpdates.length || ultimoUsoUpdates.length){
-      try {
-        if (saldoUpdates.length){
-          SHEET_CUSTOMERS.getRange(2, 4, saldoUpdates.length, 1).setValues(saldoUpdates);
-        }
-        if (ultimoUsoUpdates.length){
-          SHEET_CUSTOMERS.getRange(2, 5, ultimoUsoUpdates.length, 1).setValues(ultimoUsoUpdates);
-        }
-      } catch (syncErr) {
-        Logger.log('Aviso: falha ao sincronizar espelho de clientes: ' + syncErr.message);
-      }
-    }
-
-    Logger.log('Total clientes com saldo: ' + clientes.length);
-
-    clientes.sort((a, b) => b.saldo - a.saldo);
+    const clientes = _coletarClientesComSaldo_({ incluirZeros: false });
+    Logger.log('Total clientes considerados: ' + clientes.length);
 
     const top20 = clientes.slice(0, 20);
 
@@ -684,6 +690,23 @@ function apiGetTopClientes(payload){
       Logger.log('ERRO fallback TOP clientes: ' + fallbackErr.message);
       return { ok: false, msg: e.message };
     }
+  }
+}
+
+function apiGetClientesRelatorio(payload){
+  try {
+    const token = String(payload.token || '');
+    requireAuth(token);
+
+    Logger.log('Gerando relatório completo de clientes');
+
+    const clientes = _coletarClientesComSaldo_({ incluirZeros: true });
+    Logger.log('Total clientes retornados: ' + clientes.length);
+
+    return { ok: true, clientes };
+  } catch (e) {
+    Logger.log('ERRO apiGetClientesRelatorio: ' + e.message);
+    return { ok: false, msg: e.message };
   }
 }
 
