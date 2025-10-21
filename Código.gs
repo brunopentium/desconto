@@ -1,9 +1,65 @@
 /** ============== CONFIG & SETUP ============== **/
 const SS = SpreadsheetApp.getActive();
-const SHEET_SETTINGS   = SS.getSheetByName('Settings');
-const SHEET_CUSTOMERS  = SS.getSheetByName('Customers');
-const SHEET_TX         = SS.getSheetByName('Transactions');
-const SHEET_USERS      = SS.getSheetByName('Users');
+
+function ensureSheet(name, headers){
+  let sheet = SS.getSheetByName(name);
+  if (!sheet){
+    sheet = SS.insertSheet(name);
+  }
+
+  if (headers && headers.length){
+    const headerRange = sheet.getRange(1, 1, 1, headers.length);
+    const existingHeaders = headerRange.getValues()[0];
+    const isEmpty = existingHeaders.every(h => !String(h || '').trim());
+    if (isEmpty || headers.some((h, idx) => String(existingHeaders[idx] || '').trim() !== String(h))){
+      headerRange.setValues([headers]);
+    }
+  }
+
+  return sheet;
+}
+
+function ensureDefaultSettings(sheet){
+  if (sheet.getLastRow() <= 1){
+    const defaults = [
+      ['cashback_percent', 5, 'Percentual de cashback padrão'],
+      ['validade_dias', 90, 'Validade em dias do crédito gerado'],
+      ['ticket_min', 30, 'Valor mínimo do ticket para gerar cashback'],
+      ['teto_por_transacao', 20, 'Limite de cashback por transação (R$)'],
+      ['teto_por_cpf_mes', 50, 'Limite mensal de cashback por CPF (R$)'],
+      ['teto_por_cpf_dia', 999999, 'Limite diário opcional por CPF (R$)']
+    ];
+    sheet.getRange(2, 1, defaults.length, defaults[0].length).setValues(defaults);
+  }
+}
+
+function ensureDefaultUser(sheet){
+  if (sheet.getLastRow() <= 1){
+    const username = 'admin';
+    const senhaPadrao = 'Admin123';
+    const hash = hashSenha(senhaPadrao);
+    const agora = new Date();
+    sheet.appendRow([username, hash, 'admin', true, true, agora, '', '']);
+  }
+}
+
+const SHEET_SETTINGS   = ensureSheet('Settings', ['key', 'value', 'descricao']);
+const SHEET_CUSTOMERS  = ensureSheet('Customers', ['cpf', 'nome', 'telefone', 'saldo_centavos', 'ultimo_uso', 'criado_em']);
+const SHEET_TX         = ensureSheet('Transactions', ['timestamp', 'tipo', 'cpf', 'valor_centavos', 'valor_compra_centavos', 'operador', 'nota_ref', 'observacoes']);
+const SHEET_USERS      = ensureSheet('Users', ['username', 'password_hash', 'role', 'ativo', 'must_change', 'criado_em', 'last_login', 'last_logout']);
+
+ensureDefaultSettings(SHEET_SETTINGS);
+ensureDefaultUser(SHEET_USERS);
+
+// Formatações básicas para evitar perda de zeros em CPFs
+try {
+  SHEET_SETTINGS.getRange('A:A').setNumberFormat('@');
+  SHEET_CUSTOMERS.getRange('A:A').setNumberFormat('@');
+  SHEET_TX.getRange('C:C').setNumberFormat('@');
+  SHEET_USERS.getRange('A:A').setNumberFormat('@');
+} catch (e) {
+  Logger.log('Aviso ao formatar colunas padrão: ' + e.message);
+}
 
 // Sessão: 6h (21600s)
 const SESSION_TTL_SEC = 21600;
