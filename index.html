@@ -597,11 +597,14 @@
         if (btn) btn.disabled = true;
 
         google.script.run
-          .withSuccessHandler(r => {
+          .withSuccessHandler(response => {
             if (btn) btn.disabled = false;
+
+            const r = (response && typeof response === 'object') ? response : { ok: false };
             if(!r.ok){
-              status.textContent = r.msg || 'Falha ao gerar relatório.';
-              toast(r.msg || 'Erro ao gerar relatório', false);
+              const msg = r.msg || 'Falha ao gerar relatório.';
+              status.textContent = msg;
+              toast(msg, false);
               return;
             }
 
@@ -613,21 +616,24 @@
               return;
             }
 
-            clientes.forEach((cli, idx) => {
-              const tr = document.createElement('tr');
+            const rowsHtml = clientes.map((cli, idx) => {
               const saldoFmt = 'R$ ' + fmtBR(cli.saldo || 0);
               const ultimoUsoFmt = fmtDataHoraBR(cli.ultimo_uso);
-              tr.innerHTML = `
-                <td>${idx + 1}</td>
-                <td>${cli.cpf_formatado || cli.cpf}</td>
-                <td>${cli.nome || '-'}</td>
-                <td>${cli.telefone || '-'}</td>
-                <td>${saldoFmt}</td>
-                <td>${ultimoUsoFmt}</td>
-              `;
-              tbody.appendChild(tr);
-            });
+              const cpfFmt = cli.cpf_formatado || cli.cpf || '-';
+              const nome = cli.nome || '-';
+              const telefone = cli.telefone || '-';
+              return `
+                <tr>
+                  <td>${idx + 1}</td>
+                  <td>${cpfFmt}</td>
+                  <td>${nome}</td>
+                  <td>${telefone}</td>
+                  <td>${saldoFmt}</td>
+                  <td>${ultimoUsoFmt}</td>
+                </tr>`;
+            }).join('');
 
+            tbody.innerHTML = rowsHtml;
             status.textContent = `Total de clientes: ${clientes.length}`;
             wrap.style.display = 'block';
             clientesCarregados = true;
