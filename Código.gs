@@ -565,6 +565,8 @@ function apiGetTopClientes(payload){
     Logger.log('=== TOP Clientes: Iniciando ===');
 
     const settings = _getSettings();
+    const validadeDias = Number(settings.validade_dias || 0);
+    const validadeSegura = Number.isFinite(validadeDias) ? validadeDias : 0;
     const hoje = new Date();
 
     const txRows = SHEET_TX.getDataRange().getValues();
@@ -579,10 +581,10 @@ function apiGetTopClientes(payload){
       const cpf = _normCPF(row[2]);
       if (!cpf) continue;
 
-      const valorCent = Number(row[3]) || 0;
+      const valorCent = Number(row[3]);
       const tsRaw = row[0];
       const ts = tsRaw instanceof Date ? tsRaw : new Date(tsRaw);
-      if (!(ts instanceof Date) || isNaN(ts.getTime())) continue;
+      if (!Number.isFinite(valorCent) || !(ts instanceof Date) || isNaN(ts.getTime())) continue;
 
       if (!saldoMap[cpf]) saldoMap[cpf] = 0;
 
@@ -592,8 +594,8 @@ function apiGetTopClientes(payload){
 
       if (tipo === 'CREDITO'){
         const expira = new Date(ts);
-        expira.setDate(expira.getDate() + settings.validade_dias);
-        if (hoje <= expira) {
+        expira.setDate(expira.getDate() + validadeSegura);
+        if (!isNaN(expira.getTime()) && hoje <= expira) {
           saldoMap[cpf] += valorCent;
         }
       } else if (tipo === 'RESGATE' || tipo === 'AJUSTE'){
@@ -620,7 +622,7 @@ function apiGetTopClientes(payload){
 
       const nome = String(row[1] || '').trim();
       const telefone = String(row[2] || '').trim();
-      const saldoEleg = Math.max(0, saldoMap[cpf] || 0);
+      const saldoEleg = Math.max(0, Number(saldoMap[cpf] || 0));
       let ultimoUso = ultimoUsoMap[cpf];
       if (!ultimoUso){
         const rawUso = row[4];
@@ -669,8 +671,43 @@ function apiGetTopClientes(payload){
   } catch (e) {
     Logger.log('ERRO apiGetTopClientes: ' + e.message);
     Logger.log('Stack: ' + e.stack);
-    return { ok: false, msg: e.message };
+
+    try {
+      const fallback = _listarClientesDaSheet_();
+      Logger.log('Retornando fallback com ' + fallback.length + ' clientes.');
+      return { ok: true, clientes: fallback };
+    } catch (fallbackErr) {
+      Logger.log('ERRO fallback TOP clientes: ' + fallbackErr.message);
+      return { ok: false, msg: e.message };
+    }
   }
+}
+
+function _listarClientesDaSheet_(){
+  const custData = SHEET_CUSTOMERS.getDataRange().getValues();
+  const clientes = [];
+
+  for (let i = 1; i < custData.length; i++){
+    const row = custData[i];
+    const cpfBruto = row[0];
+    if (!cpfBruto) continue;
+
+    const cpf = _normCPF(cpfBruto);
+    const saldoCent = Number(row[3]) || 0;
+    if (saldoCent <= 0) continue;
+
+    clientes.push({
+      cpf,
+      cpf_formatado: cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4'),
+      nome: String(row[1] || '').trim() || 'Cliente ' + cpf.substring(0, 3) + '...',
+      telefone: String(row[2] || '').trim() || '-',
+      saldo: saldoCent / 100,
+      ultimo_uso: (row[4] instanceof Date && !isNaN(row[4].getTime())) ? row[4] : ''
+    });
+  }
+
+  clientes.sort((a, b) => b.saldo - a.saldo);
+  return clientes.slice(0, 20);
 }
 
 /** ============== JOB: EXPIRAR CRÉDITOS (opcional/manutenção) ============== **/
