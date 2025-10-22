@@ -718,6 +718,110 @@ function _coletarClientesComSaldo_(opcoes){
   return clientes;
 }
 
+function _formatCPFForDisplay(cpf){
+  const norm = _normCPF(cpf);
+  if (!norm) return '';
+  return norm.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+}
+
+function _normalizeDateForApi(value){
+  if (!value) return '';
+  if (value instanceof Date){
+    return isNaN(value.getTime()) ? '' : value.toISOString();
+  }
+  if (typeof value === 'number' && !Number.isNaN(value)){
+    const excelEpoch = new Date(Math.round((value - 25569) * 86400000));
+    return isNaN(excelEpoch.getTime()) ? '' : excelEpoch.toISOString();
+  }
+  const parsed = new Date(value);
+  return isNaN(parsed.getTime()) ? '' : parsed.toISOString();
+}
+
+function _obterClientesDaSheetDetalhado_(){
+  const data = SHEET_CUSTOMERS.getDataRange().getValues();
+  if (!data || data.length <= 1){
+    return {
+      clientes: [],
+      meta: {
+        totalClientes: 0,
+        totalComSaldo: 0,
+        totalSaldoCentavos: 0,
+        totalSaldo: 0,
+        maiorSaldoCentavos: 0,
+        maiorSaldo: 0,
+        atualizadoEm: new Date().toISOString()
+      }
+    };
+  }
+
+  const clientes = [];
+  let totalSaldoCentavos = 0;
+  let totalComSaldo = 0;
+  let maiorSaldoCentavos = 0;
+
+  for (let i = 1; i < data.length; i++){
+    const row = data[i];
+    if (!row) continue;
+
+    const cpf = _normCPF(row[0]);
+    if (!cpf) continue;
+
+    const nome = String(row[1] || '').trim();
+    const telefone = String(row[2] || '').trim();
+
+    let saldoCentavos = 0;
+    const saldoBruto = row[3];
+    if (typeof saldoBruto === 'number' && !Number.isNaN(saldoBruto)){
+      saldoCentavos = Math.round(saldoBruto);
+    } else if (typeof saldoBruto === 'string'){
+      const normalizado = saldoBruto.replace(/\./g, '').replace(',', '.').trim();
+      if (normalizado){
+        const parsed = Number(normalizado);
+        if (!Number.isNaN(parsed)){
+          saldoCentavos = Math.round(parsed);
+        }
+      }
+    }
+
+    const ultimoUso = _normalizeDateForApi(row[4]);
+    const criadoEm = _normalizeDateForApi(row[5]);
+
+    if (saldoCentavos > 0) totalComSaldo++;
+    if (saldoCentavos > maiorSaldoCentavos) maiorSaldoCentavos = saldoCentavos;
+    if (saldoCentavos > 0) totalSaldoCentavos += saldoCentavos;
+
+    clientes.push({
+      cpf,
+      cpf_formatado: _formatCPFForDisplay(cpf),
+      nome: nome || 'Cliente ' + cpf.substring(0, 3) + '...',
+      telefone: telefone || '-',
+      saldo_centavos: saldoCentavos,
+      saldo: saldoCentavos / 100,
+      ultimo_uso: ultimoUso,
+      criado_em: criadoEm
+    });
+  }
+
+  clientes.sort((a, b) => {
+    const diff = (b.saldo_centavos || 0) - (a.saldo_centavos || 0);
+    if (diff !== 0) return diff;
+    return a.nome.localeCompare(b.nome, 'pt-BR');
+  });
+
+  return {
+    clientes,
+    meta: {
+      totalClientes: clientes.length,
+      totalComSaldo,
+      totalSaldoCentavos,
+      totalSaldo: totalSaldoCentavos / 100,
+      maiorSaldoCentavos,
+      maiorSaldo: maiorSaldoCentavos / 100,
+      atualizadoEm: new Date().toISOString()
+    }
+  };
+}
+
 // >>> AJUSTADO: TOP clientes calculando saldo DINÂMICO e atualizando espelho
 function apiGetTopClientes(payload){
   try {
@@ -754,12 +858,12 @@ function apiGetClientesRelatorio(payload){
     const token = String(payload.token || '');
     requireAuth(token);
 
-    Logger.log('Gerando relatório completo de clientes');
+    Logger.log('Gerando relatório completo de clientes a partir da aba Customers');
 
-    const clientes = _coletarClientesComSaldo_({ incluirZeros: true });
-    Logger.log('Total clientes retornados: ' + clientes.length);
+    const resultado = _obterClientesDaSheetDetalhado_();
+    Logger.log('Total clientes retornados da aba Customers: ' + resultado.clientes.length);
 
-    return { ok: true, clientes };
+    return { ok: true, clientes: resultado.clientes, meta: resultado.meta };
   } catch (e) {
     Logger.log('ERRO apiGetClientesRelatorio: ' + e.message);
     return { ok: false, msg: e.message };
@@ -767,30 +871,18 @@ function apiGetClientesRelatorio(payload){
 }
 
 function _listarClientesDaSheet_(){
-  const custData = SHEET_CUSTOMERS.getDataRange().getValues();
-  const clientes = [];
-
-  for (let i = 1; i < custData.length; i++){
-    const row = custData[i];
-    const cpfBruto = row[0];
-    if (!cpfBruto) continue;
-
-    const cpf = _normCPF(cpfBruto);
-    const saldoCent = Number(row[3]) || 0;
-    if (saldoCent <= 0) continue;
-
-    clientes.push({
-      cpf,
-      cpf_formatado: cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4'),
-      nome: String(row[1] || '').trim() || 'Cliente ' + cpf.substring(0, 3) + '...',
-      telefone: String(row[2] || '').trim() || '-',
-      saldo: saldoCent / 100,
-      ultimo_uso: (row[4] instanceof Date && !isNaN(row[4].getTime())) ? row[4] : ''
-    });
-  }
-
-  clientes.sort((a, b) => b.saldo - a.saldo);
-  return clientes.slice(0, 20);
+  const resultado = _obterClientesDaSheetDetalhado_();
+  return resultado.clientes
+    .filter(cli => (cli.saldo_centavos || 0) > 0)
+    .slice(0, 20)
+    .map(cli => ({
+      cpf: cli.cpf,
+      cpf_formatado: cli.cpf_formatado,
+      nome: cli.nome,
+      telefone: cli.telefone,
+      saldo: cli.saldo,
+      ultimo_uso: cli.ultimo_uso ? new Date(cli.ultimo_uso) : ''
+    }));
 }
 
 /** ============== JOB: EXPIRAR CRÉDITOS (opcional/manutenção) ============== **/
