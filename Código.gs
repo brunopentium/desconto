@@ -507,36 +507,40 @@ function apiGetHistorico(payload){
     
     Logger.log('Buscando histórico para CPF: ' + cpf);
     
-    const txData = SHEET_TX.getDataRange().getValues();
+    const txSheet = SHEET_TX;
+    const lastRow = txSheet.getLastRow();
     const historico = [];
-    
-    // Pula o header (linha 0)
-    for (let i = 1; i < txData.length; i++){
-      const row = txData[i];
-      if (!row[0]) continue; // pula linha vazia
-      
-      const cpfLinha = _normCPF(row[2]);
-      if (cpfLinha !== cpf) continue;
-      
-      historico.push({
-        data: row[0], // já é Date do Sheets
-        tipo: String(row[1] || ''),
-        valor: (Number(row[3]) || 0) / 100,
-        valorCompra: row[4] ? (Number(row[4]) / 100) : null,
-        operador: String(row[5] || ''),
-        nota: String(row[6] || '')
+
+    if (lastRow > 1) {
+      const cpfRange = txSheet.getRange(2, 3, lastRow - 1, 1);
+      const finder = cpfRange.createTextFinder(cpf).matchEntireCell(true);
+      const matches = finder ? finder.findAll() : [];
+
+      matches.forEach(cell => {
+        const rowValues = txSheet.getRange(cell.getRow(), 1, 1, 8).getValues()[0];
+        if (!rowValues || !rowValues[0]) return; // ignora linhas vazias
+
+        historico.push({
+          data: rowValues[0],
+          tipo: String(rowValues[1] || ''),
+          valor: (Number(rowValues[3]) || 0) / 100,
+          valorCompra: rowValues[4] ? (Number(rowValues[4]) / 100) : null,
+          operador: String(rowValues[5] || ''),
+          nota: String(rowValues[6] || '')
+        });
       });
+
+      Logger.log('Encontradas ' + historico.length + ' transações');
+
+      historico.sort((a, b) => {
+        const dateA = new Date(a.data);
+        const dateB = new Date(b.data);
+        return dateB - dateA;
+      });
+    } else {
+      Logger.log('Transactions sheet sem dados além do cabeçalho.');
     }
-    
-    Logger.log('Encontradas ' + historico.length + ' transações');
-    
-    // Ordena do mais recente para o mais antigo
-    historico.sort((a, b) => {
-      const dateA = new Date(a.data);
-      const dateB = new Date(b.data);
-      return dateB - dateA;
-    });
-    
+
     const cliente = _getCustomer(cpf);
     const saldo = _saldoAtualElegivel_(cpf);
     _setCustomerBalance(cpf, saldo); // mantém espelho coerente
