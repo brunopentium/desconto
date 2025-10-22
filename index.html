@@ -171,6 +171,7 @@
         <div class="tab active" data-tab="operacoes" onclick="switchTab('operacoes')">Operações</div>
         <div class="tab" data-tab="dashboard" onclick="switchTab('dashboard')">Dashboard</div>
         <div class="tab" data-tab="clientes" onclick="switchTab('clientes')">Clientes</div>
+        <div class="tab" data-tab="historico" onclick="switchTab('historico')">Histórico</div>
       </div>
 
       <!-- TAB: OPERAÇÕES -->
@@ -336,6 +337,71 @@
         </div>
       </div>
 
+      <!-- TAB: HISTÓRICO -->
+      <div id="tabHistorico" class="tab-content" style="display:none">
+        <div class="card card-full client-card">
+          <div class="client-header">
+            <div>
+              <h3>Histórico de movimentações</h3>
+              <p class="muted">Consulte compras, descontos gerados e resgates por CPF.</p>
+            </div>
+          </div>
+          <div class="client-toolbar" style="margin-top:0">
+            <input id="historicoCpf" placeholder="Informe o CPF" inputmode="numeric" />
+            <button id="btnHistorico" class="btn btn-primary" onclick="buscarHistorico()">Buscar histórico</button>
+          </div>
+          <div id="historicoStatus" class="client-status">Informe o CPF do cliente e clique em "Buscar histórico".</div>
+          <div id="historicoResumo" class="client-metrics" style="display:none">
+            <div class="metric">
+              <span class="metric-label">Cliente</span>
+              <span class="metric-value" id="historicoMetricNome">-</span>
+              <span class="metric-sub" id="historicoMetricCpf">CPF não informado</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Saldo atual</span>
+              <span class="metric-value" id="historicoMetricSaldo">R$ 0,00</span>
+              <span class="metric-sub">Saldo de descontos</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Total faturado</span>
+              <span class="metric-value" id="historicoMetricFaturado">R$ 0,00</span>
+              <span class="metric-sub">Compras lançadas</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Desconto gerado</span>
+              <span class="metric-value" id="historicoMetricGerado">R$ 0,00</span>
+              <span class="metric-sub">Cashback acumulado</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Desconto resgatado</span>
+              <span class="metric-value" id="historicoMetricResgatado">R$ 0,00</span>
+              <span class="metric-sub">Total abatido</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Movimentações</span>
+              <span class="metric-value" id="historicoMetricMovimentos">0</span>
+              <span class="metric-sub">Registros encontrados</span>
+            </div>
+          </div>
+          <div id="historicoEmpty" class="muted" style="display:none">Nenhuma movimentação encontrada para este CPF.</div>
+          <div id="historicoTableWrap" class="table-wrap" style="display:none">
+            <table>
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Tipo</th>
+                  <th>Total da compra</th>
+                  <th>Desconto / Valor</th>
+                  <th>Operador</th>
+                  <th>Nota</th>
+                </tr>
+              </thead>
+              <tbody id="historicoTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
     </div>
 
     <!-- MODAL -->
@@ -358,6 +424,8 @@
       let CLIENTES_DATA = [];
       let CLIENTES_APENAS_SALDO = false;
       let CLIENTES_LAST_UPDATE = '';
+      let HISTORICO_DATA = [];
+      let HISTORICO_RESUMO = null;
       const $ = (id)=>document.getElementById(id);
       const fmtBR = (n)=> Number(n||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
       const onlyDigits = (s)=> String(s||'').replace(/\D/g,'');
@@ -448,7 +516,8 @@
         const tabMapping = {
           operacoes: 'tabOperacoes',
           dashboard: 'tabDashboard',
-          clientes: 'tabClientes'
+          clientes: 'tabClientes',
+          historico: 'tabHistorico'
         };
 
         const targetId = tabMapping[tab];
@@ -460,6 +529,11 @@
           carregarDashboard();
         } else if (tab === 'clientes' && !clientesCarregados) {
           gerarRelatorioClientes();
+        } else if (tab === 'historico') {
+          const input = $('historicoCpf');
+          if (input) {
+            setTimeout(() => input.focus(), 60);
+          }
         }
       }
 
@@ -477,7 +551,7 @@
 
       // Session restore
       (function init(){
-        ['cpfSaldo','cpfCompra','cpfResgatar'].forEach(attachCpfMask);
+        ['cpfSaldo','cpfCompra','cpfResgatar','historicoCpf'].forEach(attachCpfMask);
         ['valorCompra','valorResgatar'].forEach(attachMoneyMask);
 
         const filtroClientes = $('clientesFiltro');
@@ -490,6 +564,13 @@
           toggleSaldo.addEventListener('change', (ev) => {
             CLIENTES_APENAS_SALDO = !!ev.target.checked;
             atualizarClientesTabela();
+          });
+        }
+
+        const historicoCpfInput = $('historicoCpf');
+        if (historicoCpfInput){
+          historicoCpfInput.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter'){ ev.preventDefault(); buscarHistorico(); }
           });
         }
 
@@ -827,8 +908,200 @@
           if (btn) btn.disabled = false;
           status.textContent = 'Erro ao carregar clientes.';
           toast('Erro ao carregar clientes', false);
-          console.error('Falha ao iniciar geração do relatório:', err);
+            console.error('Falha ao iniciar geração do relatório:', err);
         }
+      }
+
+      function historicoBadge(tipo){
+        const t = String(tipo || '').toUpperCase();
+        if (t === 'CREDITO') return { className: 'badge badge-credit', label: 'Compra' };
+        if (t === 'RESGATE') return { className: 'badge badge-resgate', label: 'Resgate' };
+        return { className: 'badge badge-ajuste', label: t || 'Ajuste' };
+      }
+
+      function atualizarHistoricoResumo(resumo){
+        const wrap = $('historicoResumo');
+        if (!wrap) return;
+
+        const nomeEl = $('historicoMetricNome');
+        const cpfEl = $('historicoMetricCpf');
+        const saldoEl = $('historicoMetricSaldo');
+        const faturadoEl = $('historicoMetricFaturado');
+        const geradoEl = $('historicoMetricGerado');
+        const resgatadoEl = $('historicoMetricResgatado');
+        const movEl = $('historicoMetricMovimentos');
+
+        if (!resumo){
+          wrap.style.display = 'none';
+          if (nomeEl) nomeEl.textContent = '-';
+          if (cpfEl) cpfEl.textContent = 'CPF não informado';
+          if (saldoEl) saldoEl.textContent = 'R$ 0,00';
+          if (faturadoEl) faturadoEl.textContent = 'R$ 0,00';
+          if (geradoEl) geradoEl.textContent = 'R$ 0,00';
+          if (resgatadoEl) resgatadoEl.textContent = 'R$ 0,00';
+          if (movEl) movEl.textContent = '0';
+          return;
+        }
+
+        if (nomeEl) nomeEl.textContent = resumo.nome || '—';
+        if (cpfEl) cpfEl.textContent = resumo.cpf ? formatCPF(resumo.cpf) : 'CPF não informado';
+        if (saldoEl) saldoEl.textContent = 'R$ ' + fmtBR(resumo.saldoAtual || 0);
+        if (faturadoEl) faturadoEl.textContent = 'R$ ' + fmtBR(resumo.totalFaturado || 0);
+        if (geradoEl) geradoEl.textContent = 'R$ ' + fmtBR(resumo.totalGerado || 0);
+        if (resgatadoEl) resgatadoEl.textContent = 'R$ ' + fmtBR(resumo.totalResgatado || 0);
+        if (movEl) movEl.textContent = resumo.movimentos || 0;
+
+        wrap.style.display = 'grid';
+      }
+
+      function atualizarHistoricoTabela(){
+        const tbody = $('historicoTableBody');
+        const wrap = $('historicoTableWrap');
+        const empty = $('historicoEmpty');
+        if (!tbody || !wrap || !empty) return;
+
+        tbody.innerHTML = '';
+
+        HISTORICO_DATA.forEach(item => {
+          const tipo = String(item.tipo || '').toUpperCase();
+          const badge = historicoBadge(tipo);
+          const tr = document.createElement('tr');
+
+          const compraVal = (tipo === 'CREDITO' && item.valorCompra !== null && item.valorCompra !== undefined)
+            ? 'R$ ' + fmtBR(item.valorCompra || 0)
+            : '—';
+
+          let valorTexto;
+          const valorNumero = Number(item.valor || 0);
+          if (tipo === 'CREDITO'){
+            valorTexto = 'R$ ' + fmtBR(valorNumero);
+          } else if (tipo === 'RESGATE'){
+            valorTexto = 'R$ ' + fmtBR(Math.abs(valorNumero));
+          } else {
+            const sinal = valorNumero >= 0 ? '+' : '-';
+            valorTexto = `${sinal} R$ ${fmtBR(Math.abs(valorNumero))}`;
+          }
+
+          tr.innerHTML = `
+            <td>${fmtDataHoraBR(item.data)}</td>
+            <td><span class="${badge.className}">${badge.label}</span></td>
+            <td>${compraVal}</td>
+            <td>${valorTexto}</td>
+            <td>${item.operador || '-'}</td>
+            <td>${item.nota || '-'}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+        if (HISTORICO_DATA.length){
+          wrap.style.display = 'block';
+          empty.style.display = 'none';
+        } else {
+          wrap.style.display = 'none';
+          empty.style.display = 'block';
+        }
+      }
+
+      function limparHistoricoUI(){
+        HISTORICO_DATA = [];
+        HISTORICO_RESUMO = null;
+        const tbody = $('historicoTableBody');
+        if (tbody) tbody.innerHTML = '';
+        const wrap = $('historicoTableWrap');
+        if (wrap) wrap.style.display = 'none';
+        const empty = $('historicoEmpty');
+        if (empty) empty.style.display = 'none';
+        atualizarHistoricoResumo(null);
+      }
+
+      function buscarHistorico(){
+        const input = $('historicoCpf');
+        const status = $('historicoStatus');
+        const btn = $('btnHistorico');
+        const cpfDigitado = input ? input.value : '';
+        const cpfLimpo = onlyDigits(cpfDigitado);
+
+        if (cpfLimpo.length !== 11){
+          if (status) status.textContent = 'Informe um CPF válido com 11 dígitos.';
+          toast('Informe um CPF válido.', false);
+          return;
+        }
+
+        limparHistoricoUI();
+
+        if (status) status.textContent = 'Consultando histórico...';
+        if (btn) btn.disabled = true;
+
+        google.script.run
+          .withSuccessHandler(r => {
+            if (btn) btn.disabled = false;
+            if (!r || !r.ok){
+              if (isSessionError(r)) { forceRelog(r && r.msg ? r.msg : 'Sessão expirada.'); return; }
+              if (status) status.textContent = (r && r.msg) ? r.msg : 'Erro ao consultar histórico.';
+              toast((r && r.msg) ? r.msg : 'Erro ao consultar histórico', false);
+              return;
+            }
+
+            const historico = Array.isArray(r.historico) ? r.historico : [];
+
+            HISTORICO_DATA = historico.map(item => ({
+              data: item.data,
+              tipo: item.tipo,
+              valor: Number(item.valor || 0),
+              valorCompra: item.valorCompra === null || item.valorCompra === undefined ? null : Number(item.valorCompra || 0),
+              operador: item.operador || '',
+              nota: item.nota || ''
+            }));
+
+            let totalFaturado = 0;
+            let totalGerado = 0;
+            let totalResgatado = 0;
+
+            HISTORICO_DATA.forEach(item => {
+              const tipo = String(item.tipo || '').toUpperCase();
+              if (tipo === 'CREDITO'){
+                if (item.valorCompra !== null && item.valorCompra !== undefined){
+                  totalFaturado += Number(item.valorCompra || 0);
+                }
+                totalGerado += Number(item.valor || 0);
+              } else if (tipo === 'RESGATE'){
+                totalResgatado += Math.abs(Number(item.valor || 0));
+              } else {
+                const valorNumero = Number(item.valor || 0);
+                if (valorNumero >= 0) totalGerado += valorNumero;
+                else totalResgatado += Math.abs(valorNumero);
+              }
+            });
+
+            HISTORICO_RESUMO = {
+              cpf: r.cpf,
+              nome: r.nome,
+              saldoAtual: Number(r.saldoAtual || 0),
+              totalFaturado,
+              totalGerado,
+              totalResgatado,
+              movimentos: HISTORICO_DATA.length
+            };
+
+            atualizarHistoricoResumo(HISTORICO_RESUMO);
+            atualizarHistoricoTabela();
+
+            if (status){
+              if (HISTORICO_DATA.length){
+                const plural = HISTORICO_DATA.length > 1 ? 'movimentações' : 'movimentação';
+                status.textContent = `${HISTORICO_DATA.length} ${plural} encontradas.`;
+              } else {
+                status.textContent = 'Nenhuma movimentação encontrada para este CPF.';
+              }
+            }
+          })
+          .withFailureHandler(e => {
+            if (btn) btn.disabled = false;
+            if (isSessionError(e)) { forceRelog('Sua sessão expirou.'); return; }
+            if (status) status.textContent = 'Erro ao consultar histórico.';
+            toast('Erro ao consultar histórico', false);
+          })
+          .apiGetHistorico({ token: TOKEN, cpf: cpfLimpo });
       }
 
     </script>
