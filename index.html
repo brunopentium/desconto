@@ -75,6 +75,26 @@
       .badge-resgate{background:rgba(255,92,92,.15); color:#ff5c5c}
       .badge-ajuste{background:rgba(100,150,255,.15); color:#6496ff}
 
+      /* Clientes */
+      .client-card{display:flex; flex-direction:column; gap:18px}
+      .client-header{display:flex; flex-wrap:wrap; justify-content:space-between; gap:14px; align-items:flex-start}
+      .client-header h3{margin:0; font-size:20px}
+      .client-status{font-size:13px; color:var(--subtle)}
+      .client-toolbar{display:flex; gap:12px; flex-wrap:wrap; align-items:center}
+      .client-toolbar input{max-width:280px}
+      .client-metrics{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px}
+      .metric{background:#0b221e; padding:12px 14px; border-radius:12px; border:1px solid var(--muted); display:flex; flex-direction:column; gap:4px}
+      .metric-label{font-size:12px; color:var(--subtle); letter-spacing:.4px; text-transform:uppercase}
+      .metric-value{font-size:22px; font-weight:700; color:var(--gold)}
+      .metric-sub{font-size:12px; color:var(--subtle)}
+      .toggle{display:flex; align-items:center; gap:8px; font-size:13px; color:var(--subtle)}
+      .toggle input{width:16px; height:16px; accent-color:var(--gold)}
+
+      @media(max-width:540px){
+        .client-toolbar input{width:100%; flex:1 1 100%}
+        .metric-value{font-size:20px}
+      }
+
       /* Search results */
       .search-results{margin-top:8px; max-height:300px; overflow-y:auto; background:#0b221e; border:1px solid var(--muted); border-radius:12px}
       .search-item{padding:10px 12px; cursor:pointer; border-bottom:1px solid rgba(212,175,55,.06); transition:all .15s}
@@ -256,12 +276,45 @@
 
       <!-- TAB: CLIENTES -->
       <div id="tabClientes" class="tab-content" style="display:none">
-        <div class="card card-full">
-          <h3>Relatório de Clientes</h3>
-          <p class="muted">Gere a lista completa dos clientes com seus saldos de desconto atualizados.</p>
-          <div class="actions" style="margin-bottom:12px">
-            <button id="btnRelatorioClientes" class="btn btn-primary" onclick="gerarRelatorioClientes()">Gerar Relatório</button>
-            <span id="clientesStatus" class="muted"></span>
+        <div class="card card-full client-card">
+          <div class="client-header">
+            <div>
+              <h3>Base de Clientes</h3>
+              <p class="muted">Visualize em tempo real os clientes cadastrados na aba <strong>Customers</strong> da planilha.</p>
+            </div>
+            <div class="actions" style="margin:0">
+              <button id="btnRelatorioClientes" class="btn btn-primary" onclick="gerarRelatorioClientes()">Atualizar lista</button>
+            </div>
+          </div>
+          <div id="clientesStatus" class="client-status">Clique em "Atualizar lista" para carregar os clientes.</div>
+          <div id="clientesMetrics" class="client-metrics" style="display:none">
+            <div class="metric">
+              <span class="metric-label">Clientes cadastrados</span>
+              <span class="metric-value" id="clientesMetricTotal">0</span>
+              <span class="metric-sub">Total na planilha</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Clientes com saldo</span>
+              <span class="metric-value" id="clientesMetricAtivos">0</span>
+              <span class="metric-sub">Saldo maior que zero</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Saldo acumulado</span>
+              <span class="metric-value" id="clientesMetricSaldo">R$ 0,00</span>
+              <span class="metric-sub">Somatório dos saldos</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Maior saldo</span>
+              <span class="metric-value" id="clientesMetricMaior">R$ 0,00</span>
+              <span class="metric-sub">Cliente no topo da lista</span>
+            </div>
+          </div>
+          <div id="clientesToolbar" class="client-toolbar" style="display:none">
+            <input id="clientesFiltro" placeholder="Filtrar por nome ou CPF" />
+            <label class="toggle">
+              <input type="checkbox" id="clientesSomenteSaldo" />
+              <span>Mostrar apenas clientes com saldo</span>
+            </label>
           </div>
           <div id="clientesEmpty" class="muted" style="display:none">Nenhum cliente encontrado.</div>
           <div id="clientesTableWrap" class="table-wrap" style="display:none">
@@ -272,8 +325,9 @@
                   <th>CPF</th>
                   <th>Nome</th>
                   <th>Telefone</th>
-                  <th>Saldo</th>
+                  <th>Saldo atual</th>
                   <th>Último uso</th>
+                  <th>Cadastro</th>
                 </tr>
               </thead>
               <tbody id="clientesTableBody"></tbody>
@@ -301,10 +355,33 @@
       let TOKEN = null, CURRENT_USER = null;
       let currentTab = 'operacoes';
       let clientesCarregados = false;
+      let CLIENTES_DATA = [];
+      let CLIENTES_APENAS_SALDO = false;
+      let CLIENTES_LAST_UPDATE = '';
       const $ = (id)=>document.getElementById(id);
       const fmtBR = (n)=> Number(n||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
       const onlyDigits = (s)=> String(s||'').replace(/\D/g,'');
       const isVisible = (node)=> !!node && node.style.display !== 'none';
+
+      function formatCPF(value){
+        const digits = onlyDigits(value);
+        if (digits.length !== 11) return value || '-';
+        return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+      }
+
+      function fmtDataCurta(v){
+        if(!v) return '-';
+        const d = new Date(v);
+        if (isNaN(d)) return '-';
+        return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      }
+
+      function fmtDataDia(v){
+        if(!v) return '-';
+        const d = new Date(v);
+        if (isNaN(d)) return '-';
+        return d.toLocaleDateString('pt-BR');
+      }
 
       function clearOutputs(except){
         if(except!=='saldo')   $('outSaldo').textContent   = '';
@@ -384,10 +461,6 @@
         } else if (tab === 'clientes' && !clientesCarregados) {
           gerarRelatorioClientes();
         }
-
-        if (tab === 'clientes' && !clientesCarregados) {
-          gerarRelatorioClientes();
-        }
       }
 
       // Helpers de sessão no front
@@ -406,6 +479,19 @@
       (function init(){
         ['cpfSaldo','cpfCompra','cpfResgatar'].forEach(attachCpfMask);
         ['valorCompra','valorResgatar'].forEach(attachMoneyMask);
+
+        const filtroClientes = $('clientesFiltro');
+        if (filtroClientes){
+          filtroClientes.addEventListener('input', debounce(() => atualizarClientesTabela(), 200));
+        }
+
+        const toggleSaldo = $('clientesSomenteSaldo');
+        if (toggleSaldo){
+          toggleSaldo.addEventListener('change', (ev) => {
+            CLIENTES_APENAS_SALDO = !!ev.target.checked;
+            atualizarClientesTabela();
+          });
+        }
 
         const t = localStorage.getItem('cb_token'), u = localStorage.getItem('cb_user');
         if (t && u){ TOKEN=t; CURRENT_USER=u; $('who').textContent='Operador: '+CURRENT_USER; showApp(); }
@@ -589,6 +675,87 @@
           .apiGetDashboard({ token: TOKEN });
       }
 
+      function atualizarResumoClientes(meta){
+        const metrics = $('clientesMetrics');
+        if (!metrics) return;
+
+        if (!meta){
+          metrics.style.display = 'none';
+          $('clientesMetricTotal').textContent = '0';
+          $('clientesMetricAtivos').textContent = '0';
+          $('clientesMetricSaldo').textContent = 'R$ 0,00';
+          $('clientesMetricMaior').textContent = 'R$ 0,00';
+          CLIENTES_LAST_UPDATE = '';
+          return;
+        }
+
+        $('clientesMetricTotal').textContent = meta.totalClientes || 0;
+        $('clientesMetricAtivos').textContent = meta.totalComSaldo || 0;
+        $('clientesMetricSaldo').textContent = 'R$ ' + fmtBR(meta.totalSaldo || 0);
+        $('clientesMetricMaior').textContent = 'R$ ' + fmtBR(meta.maiorSaldo || 0);
+        CLIENTES_LAST_UPDATE = meta.atualizadoEm || new Date().toISOString();
+        metrics.style.display = 'grid';
+      }
+
+      function atualizarClientesTabela(){
+        const tbody = $('clientesTableBody');
+        const wrap = $('clientesTableWrap');
+        const emptyState = $('clientesEmpty');
+        const status = $('clientesStatus');
+        if (!tbody || !wrap || !emptyState || !status) return;
+
+        const filtroInput = $('clientesFiltro');
+        const filtro = filtroInput ? filtroInput.value.trim().toLowerCase() : '';
+        const filtroDigits = onlyDigits(filtro);
+
+        const listaFiltrada = CLIENTES_DATA.filter(cli => {
+          const nome = String(cli.nome || '').toLowerCase();
+          const cpf = String(cli.cpf || '');
+          const cpfFmt = String(cli.cpf_formatado || '').toLowerCase();
+          const saldoOk = !CLIENTES_APENAS_SALDO || (Number(cli.saldo_centavos || 0) > 0);
+          if (!filtro) return saldoOk;
+          const cpfMatch = cpf.includes(filtroDigits) || cpfFmt.includes(filtro);
+          const nomeMatch = nome.includes(filtro);
+          return saldoOk && (cpfMatch || nomeMatch);
+        });
+
+        tbody.innerHTML = '';
+        listaFiltrada.forEach((cli, idx) => {
+          const tr = document.createElement('tr');
+          const saldoFmt = 'R$ ' + fmtBR(cli.saldo || 0);
+          tr.innerHTML = `
+            <td>${idx + 1}</td>
+            <td>${cli.cpf_formatado || formatCPF(cli.cpf)}</td>
+            <td>${cli.nome || '-'}</td>
+            <td>${cli.telefone || '-'}</td>
+            <td>${saldoFmt}</td>
+            <td>${fmtDataCurta(cli.ultimo_uso)}</td>
+            <td>${fmtDataDia(cli.criado_em)}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+        if (listaFiltrada.length){
+          wrap.style.display = 'block';
+          emptyState.style.display = 'none';
+        } else {
+          wrap.style.display = 'none';
+          emptyState.textContent = CLIENTES_DATA.length
+            ? 'Nenhum cliente corresponde ao filtro aplicado.'
+            : 'Nenhum cliente encontrado na planilha.';
+          emptyState.style.display = 'block';
+        }
+
+        const exibidos = listaFiltrada.length;
+        const baseMsg = exibidos
+          ? `${exibidos} cliente${exibidos > 1 ? 's' : ''} exibido${exibidos > 1 ? 's' : ''}.`
+          : (CLIENTES_DATA.length
+            ? 'Nenhum cliente corresponde ao filtro aplicado.'
+            : 'Nenhum cliente encontrado na planilha.');
+        const atualizado = CLIENTES_LAST_UPDATE ? ` • Atualizado em ${fmtDataCurta(CLIENTES_LAST_UPDATE)}` : '';
+        status.textContent = baseMsg + atualizado;
+      }
+
       function gerarRelatorioClientes(){
         const btn = $('btnRelatorioClientes');
         const status = $('clientesStatus');
@@ -596,10 +763,17 @@
         const tbody = $('clientesTableBody');
         const emptyState = $('clientesEmpty');
 
-        status.textContent = 'Gerando relatório...';
+        const metrics = $('clientesMetrics');
+        const toolbar = $('clientesToolbar');
+
+        if (status) status.textContent = 'Atualizando lista de clientes...';
         wrap.style.display = 'none';
         emptyState.style.display = 'none';
         tbody.innerHTML = '';
+        CLIENTES_DATA = [];
+        CLIENTES_LAST_UPDATE = '';
+        if (metrics) metrics.style.display = 'none';
+        if (toolbar) toolbar.style.display = 'none';
         if (btn) btn.disabled = true;
 
         try {
@@ -607,49 +781,52 @@
             .withSuccessHandler(r => {
               if (btn) btn.disabled = false;
               if(!r.ok){
-                status.textContent = r.msg || 'Falha ao gerar relatório.';
-                toast(r.msg || 'Erro ao gerar relatório', false);
+                status.textContent = r.msg || 'Falha ao carregar clientes.';
+                toast(r.msg || 'Erro ao carregar clientes', false);
                 return;
               }
 
               const clientes = Array.isArray(r.clientes) ? r.clientes : [];
-              if (!clientes.length){
-                status.textContent = '';
-                emptyState.style.display = 'block';
-                clientesCarregados = true;
-                return;
+              CLIENTES_DATA = clientes.map(cli => ({
+                cpf: cli.cpf,
+                cpf_formatado: cli.cpf_formatado,
+                nome: cli.nome,
+                telefone: cli.telefone,
+                saldo: Number(cli.saldo || ((cli.saldo_centavos || 0) / 100)),
+                saldo_centavos: Number(cli.saldo_centavos || Math.round((cli.saldo || 0) * 100)),
+                ultimo_uso: cli.ultimo_uso,
+                criado_em: cli.criado_em
+              }));
+
+              atualizarResumoClientes(r.meta);
+
+              if (CLIENTES_DATA.length){
+                if (toolbar) toolbar.style.display = 'flex';
+                if (emptyState) emptyState.style.display = 'none';
+                CLIENTES_APENAS_SALDO = !!($('clientesSomenteSaldo') && $('clientesSomenteSaldo').checked);
+                atualizarClientesTabela();
+              } else {
+                if (emptyState) {
+                  emptyState.textContent = 'Nenhum cliente encontrado na aba Customers.';
+                  emptyState.style.display = 'block';
+                }
+                const atualizado = CLIENTES_LAST_UPDATE ? ` • Atualizado em ${fmtDataCurta(CLIENTES_LAST_UPDATE)}` : '';
+                status.textContent = 'Nenhum cliente encontrado na aba Customers.' + atualizado;
               }
 
-              clientes.forEach((cli, idx) => {
-                const tr = document.createElement('tr');
-                const saldoFmt = 'R$ ' + fmtBR(cli.saldo || 0);
-                const ultimoUsoFmt = fmtDataHoraBR(cli.ultimo_uso);
-                tr.innerHTML = `
-                  <td>${idx + 1}</td>
-                  <td>${cli.cpf_formatado || cli.cpf}</td>
-                  <td>${cli.nome || '-'}</td>
-                  <td>${cli.telefone || '-'}</td>
-                  <td>${saldoFmt}</td>
-                  <td>${ultimoUsoFmt}</td>
-                `;
-                tbody.appendChild(tr);
-              });
-
-              status.textContent = `Total de clientes: ${clientes.length}`;
-              wrap.style.display = 'block';
               clientesCarregados = true;
             })
             .withFailureHandler(e => {
               if (btn) btn.disabled = false;
-              status.textContent = 'Erro ao gerar relatório.';
+              status.textContent = 'Erro ao carregar clientes.';
               if (isSessionError(e)) { forceRelog('Sua sessão expirou.'); return; }
-              toast('Erro ao gerar relatório', false);
+              toast('Erro ao carregar clientes', false);
             })
             .apiGetClientesRelatorio({ token: TOKEN });
         } catch(err) {
           if (btn) btn.disabled = false;
-          status.textContent = 'Erro ao gerar relatório.';
-          toast('Erro ao gerar relatório', false);
+          status.textContent = 'Erro ao carregar clientes.';
+          toast('Erro ao carregar clientes', false);
           console.error('Falha ao iniciar geração do relatório:', err);
         }
       }
