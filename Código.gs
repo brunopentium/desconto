@@ -578,6 +578,8 @@ function apiGetHistorico(payload){
           else totalResgatadoCent += Math.abs(valorCentavos);
         }
 
+        const rowIndex = i + 2; // considerando cabeçalho na linha 1
+
         historico.push({
           data: dataISO || dataDisplay || '',
           dataDisplay,
@@ -588,7 +590,9 @@ function apiGetHistorico(payload){
           valorCompra: valorCompraCent === null ? null : (valorCompraCent / 100),
           operador,
           nota,
-          observacoes
+          observacoes,
+          rowIndex,
+          cpf
         });
       }
 
@@ -634,6 +638,201 @@ function apiGetHistorico(payload){
   } catch (e) {
     Logger.log('ERRO apiGetHistorico: ' + e.message);
     return { ok: false, msg: e.message };
+  }
+}
+
+// Cancelamento de uma transação específica pelo índice da linha
+function apiCancelarTransacao(payload){
+  const lock = LockService.getScriptLock();
+  const locked = lock.tryLock(20000);
+  if (!locked) {
+    return { ok:false, msg:'Sistema temporariamente ocupado. Tente novamente.' };
+  }
+
+  try {
+    const token = String(payload.token || '');
+    requireAuth(token);
+
+    const cpfPayload = String(payload.cpf || '');
+    const cpf = _normCPF(cpfPayload);
+    const rowIndex = Number(payload.rowIndex || 0);
+
+    if (!rowIndex || rowIndex < 2){
+      return { ok:false, msg:'Transação inválida para cancelamento.' };
+    }
+
+    const lastRow = SHEET_TX.getLastRow();
+    if (rowIndex > lastRow){
+      return { ok:false, msg:'Transação não encontrada.' };
+    }
+
+    const rowValues = SHEET_TX.getRange(rowIndex, 1, 1, 8).getValues()[0];
+    if (!rowValues || !rowValues[0]){
+      return { ok:false, msg:'Transação já removida ou inexistente.' };
+    }
+
+    const rowCpf = _normCPF(rowValues[2]);
+    if (cpf && rowCpf && cpf !== rowCpf){
+      return { ok:false, msg:'Transação não corresponde ao CPF informado.' };
+    }
+
+    SHEET_TX.deleteRow(rowIndex);
+
+    const alvoCpf = rowCpf || cpf;
+    let novoSaldoCent = 0;
+    if (alvoCpf){
+      novoSaldoCent = _saldoAtualElegivel_(alvoCpf);
+      _setCustomerBalance(alvoCpf, novoSaldoCent);
+    }
+
+    return { ok:true, cpf: alvoCpf, saldoAtual: novoSaldoCent / 100 };
+  } catch (e) {
+    return { ok:false, msg: e.message };
+  } finally {
+    try { if (locked) lock.releaseLock(); } catch (_) {}
+  }
+}
+
+// Histórico consolidado por período (todas as transações)
+function apiGetHistoricoPeriodo(payload){
+  try {
+    const token = String(payload.token || '');
+    requireAuth(token);
+
+    const inicioStr = String(payload.inicio || '');
+    const fimStr = String(payload.fim || '');
+
+    if (!inicioStr || !fimStr){
+      return { ok:false, msg:'Período inicial e final são obrigatórios.' };
+    }
+
+    const inicio = new Date(inicioStr);
+    const fim = new Date(fimStr);
+
+    if (isNaN(inicio) || isNaN(fim)){
+      return { ok:false, msg:'Período informado é inválido.' };
+    }
+    if (fim.getTime() < inicio.getTime()){
+      return { ok:false, msg:'Data final não pode ser anterior à data inicial.' };
+    }
+
+    const linhas = SHEET_TX.getDataRange().getValues();
+    const tz = Session.getScriptTimeZone();
+
+    const historico = [];
+
+    if (linhas.length > 1){
+      for (let i = 1; i < linhas.length; i++){
+        const row = linhas[i];
+        if (!row[0]) continue;
+
+        const rawTs = row[0];
+        let tsDate = null;
+        let dataISO = '';
+        let dataDisplay = '';
+
+        if (rawTs instanceof Date){
+          tsDate = new Date(rawTs.getTime());
+        } else if (rawTs){
+          const parsed = new Date(rawTs);
+          if (!isNaN(parsed.getTime())){
+            tsDate = parsed;
+          } else {
+            const txt = String(rawTs);
+            const parts = txt.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+            if (parts){
+              const dia = Number(parts[1]);
+              const mes = Number(parts[2]);
+              const ano = Number(parts[3]);
+              const hora = Number(parts[4] || 0);
+              const minuto = Number(parts[5] || 0);
+              const segundo = Number(parts[6] || 0);
+              const manual = new Date(ano, mes - 1, dia, hora, minuto, segundo);
+              if (!isNaN(manual.getTime())){
+                tsDate = manual;
+              }
+            }
+          }
+        }
+
+        if (!tsDate || isNaN(tsDate.getTime())) continue;
+
+        const tsTime = tsDate.getTime();
+        if (tsTime < inicio.getTime() || tsTime > fim.getTime()){
+          continue;
+        }
+
+        dataISO = tsDate.toISOString();
+        dataDisplay = Utilities.formatDate(tsDate, tz, "dd/MM/yyyy HH:mm:ss");
+
+        const tipo = String(row[1] || '').toUpperCase();
+        const cpf = _normCPF(row[2]);
+        const valorCentavos = Number(row[3]) || 0;
+        const valorCompraCentavos = (row[4] === null || row[4] === '') ? null : Number(row[4]) || 0;
+        const operador = String(row[5] || '');
+        const nota = String(row[6] || '');
+        const observacoes = String(row[7] || '');
+        const rowIndex = i + 1; // cabeçalho ocupa a primeira linha
+
+        historico.push({
+          data: dataISO,
+          dataDisplay,
+          tipo,
+          cpf,
+          valorCentavos,
+          valor: valorCentavos / 100,
+          valorCompraCentavos,
+          valorCompra: valorCompraCentavos === null ? null : (valorCompraCentavos / 100),
+          operador,
+          nota,
+          observacoes,
+          rowIndex
+        });
+      }
+    }
+
+    historico.sort((a, b) => {
+      const aDate = new Date(a.data);
+      const bDate = new Date(b.data);
+      return (isNaN(bDate) ? 0 : bDate.getTime()) - (isNaN(aDate) ? 0 : aDate.getTime());
+    });
+
+    let totalCreditoCent = 0;
+    let totalResgateCent = 0;
+    let totalAjusteCent = 0;
+
+    historico.forEach(item => {
+      const tipo = String(item.tipo || '').toUpperCase();
+      const valorCent = Number(item.valorCentavos || 0);
+      if (tipo === 'CREDITO'){
+        totalCreditoCent += Math.max(0, valorCent);
+      } else if (tipo === 'RESGATE'){
+        totalResgateCent += Math.abs(valorCent);
+      } else {
+        totalAjusteCent += valorCent;
+      }
+    });
+
+    const totalLiquidoCent = historico.reduce((acc, item) => acc + Number(item.valorCentavos || 0), 0);
+
+    const resumo = {
+      movimentos: historico.length,
+      totalCreditoCentavos: totalCreditoCent,
+      totalCredito: totalCreditoCent / 100,
+      totalResgateCentavos: totalResgateCent,
+      totalResgate: totalResgateCent / 100,
+      totalAjusteCentavos: totalAjusteCent,
+      totalAjuste: totalAjusteCent / 100,
+      totalLiquidoCentavos: totalLiquidoCent,
+      totalLiquido: totalLiquidoCent / 100,
+      periodoInicio: inicio.toISOString(),
+      periodoFim: fim.toISOString()
+    };
+
+    return { ok:true, historico, resumo };
+  } catch (e) {
+    Logger.log('ERRO apiGetHistoricoPeriodo: ' + e.message);
+    return { ok:false, msg: e.message };
   }
 }
 

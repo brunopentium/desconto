@@ -394,9 +394,69 @@
                   <th>Desconto / Valor</th>
                   <th>Operador</th>
                   <th>Nota</th>
+                  <th>Ações</th>
                 </tr>
               </thead>
               <tbody id="historicoTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card card-full client-card" style="margin-top:16px">
+          <div class="client-header">
+            <div>
+              <h3>Consulta por período</h3>
+              <p class="muted">Liste transações de todos os CPFs por data.</p>
+            </div>
+          </div>
+          <div class="client-toolbar" style="margin-top:0">
+            <input id="historicoInicio" type="date" />
+            <input id="historicoFim" type="date" />
+            <button id="btnHistoricoPeriodo" class="btn btn-primary" onclick="buscarHistoricoPeriodo()">Buscar período</button>
+          </div>
+          <div id="historicoPeriodoStatus" class="client-status">Selecione um intervalo de datas e clique em "Buscar período".</div>
+          <div id="historicoPeriodoResumo" class="client-metrics" style="display:none">
+            <div class="metric">
+              <span class="metric-label">Período</span>
+              <span class="metric-value" id="historicoPeriodoIntervalo">-</span>
+              <span class="metric-sub">Datas consideradas</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Movimentações</span>
+              <span class="metric-value" id="historicoPeriodoMovimentos">0</span>
+              <span class="metric-sub">Registros encontrados</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Crédito gerado</span>
+              <span class="metric-value" id="historicoPeriodoCredito">R$ 0,00</span>
+              <span class="metric-sub">Somatório positivo</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Resgate / Ajustes</span>
+              <span class="metric-value" id="historicoPeriodoResgate">R$ 0,00</span>
+              <span class="metric-sub">Resgates e ajustes negativos</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Líquido</span>
+              <span class="metric-value" id="historicoPeriodoLiquido">R$ 0,00</span>
+              <span class="metric-sub">Saldo do período</span>
+            </div>
+          </div>
+          <div id="historicoPeriodoEmpty" class="muted" style="display:none">Nenhuma transação encontrada para o período selecionado.</div>
+          <div id="historicoPeriodoTableWrap" class="table-wrap" style="display:none">
+            <table>
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>CPF</th>
+                  <th>Tipo</th>
+                  <th>Total da compra</th>
+                  <th>Desconto / Valor</th>
+                  <th>Operador</th>
+                  <th>Nota</th>
+                  <th>Ações</th>
+                </tr>
+              </thead>
+              <tbody id="historicoPeriodoTableBody"></tbody>
             </table>
           </div>
         </div>
@@ -426,6 +486,9 @@
       let CLIENTES_LAST_UPDATE = '';
       let HISTORICO_DATA = [];
       let HISTORICO_RESUMO = null;
+      let HISTORICO_PERIODO_DATA = [];
+      let HISTORICO_PERIODO_RESUMO = null;
+      let HISTORICO_PERIODO_PARAM = null;
       const $ = (id)=>document.getElementById(id);
       const fmtBR = (n)=> Number(n||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
       const onlyDigits = (s)=> String(s||'').replace(/\D/g,'');
@@ -1006,7 +1069,25 @@
             <td>${valorTexto}</td>
             <td>${item.operador || '-'}</td>
             <td>${item.nota || '-'}</td>
+            <td></td>
           `;
+          const actionsTd = tr.lastElementChild;
+          if (actionsTd){
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'btn btn-ghost btn-small';
+            cancelBtn.type = 'button';
+            cancelBtn.textContent = 'Cancelar';
+            cancelBtn.addEventListener('click', () => {
+              const cpfAlvo = item.cpf || (HISTORICO_RESUMO ? HISTORICO_RESUMO.cpf : '');
+              confirmarCancelamentoTransacao({
+                rowIndex: item.rowIndex,
+                cpf: cpfAlvo,
+                descricao: `${dataTexto} • ${badge.label}`,
+                contexto: 'historico-cpf'
+              });
+            });
+            actionsTd.appendChild(cancelBtn);
+          }
           tbody.appendChild(tr);
         });
 
@@ -1029,6 +1110,54 @@
         const empty = $('historicoEmpty');
         if (empty) empty.style.display = 'none';
         atualizarHistoricoResumo(null);
+      }
+
+      function confirmarCancelamentoTransacao({ rowIndex, cpf, descricao, contexto }){
+        const statusEl = contexto === 'historico-cpf'
+          ? $('historicoStatus')
+          : $('historicoPeriodoStatus');
+
+        if (!rowIndex || !cpf){
+          if (statusEl) statusEl.textContent = 'Não foi possível identificar a transação selecionada.';
+          toast('Não foi possível identificar a transação selecionada.', false);
+          return;
+        }
+
+        const detalhes = descricao ? `<p><strong>${descricao}</strong></p>` : '';
+        openModal(
+          'Cancelar transação',
+          `<p>Confirma cancelar esta transação?</p>${detalhes}<p class="muted">O registro será removido e o saldo atualizado automaticamente.</p>`,
+          () => {
+            if (statusEl) statusEl.textContent = 'Cancelando transação...';
+            google.script.run
+              .withSuccessHandler(r => {
+                if (!r || !r.ok){
+                  if (isSessionError(r)) { forceRelog(r && r.msg ? r.msg : 'Sessão expirada.'); return; }
+                  if (statusEl) statusEl.textContent = (r && r.msg) ? r.msg : 'Erro ao cancelar transação.';
+                  toast((r && r.msg) ? r.msg : 'Erro ao cancelar transação', false);
+                  return;
+                }
+
+                toast('Transação cancelada.');
+
+                if (contexto === 'historico-cpf'){
+                  if (statusEl) statusEl.textContent = 'Transação cancelada. Recarregando histórico...';
+                  buscarHistorico();
+                } else if (contexto === 'historico-periodo'){
+                  if (statusEl) statusEl.textContent = 'Transação cancelada. Atualizando lista...';
+                  buscarHistoricoPeriodo(true);
+                } else {
+                  if (statusEl) statusEl.textContent = '';
+                }
+              })
+              .withFailureHandler(e => {
+                if (isSessionError(e)) { forceRelog('Sua sessão expirou.'); return; }
+                if (statusEl) statusEl.textContent = 'Erro ao cancelar transação.';
+                toast('Erro ao cancelar transação', false);
+              })
+              .apiCancelarTransacao({ token: TOKEN, cpf, rowIndex });
+          }
+        );
       }
 
       function buscarHistorico(){
@@ -1075,7 +1204,9 @@
                 : Number(item.valorCompraCentavos || 0),
               operador: item.operador || '',
               nota: item.nota || '',
-              observacoes: item.observacoes || ''
+              observacoes: item.observacoes || '',
+              rowIndex: Number(item.rowIndex || 0),
+              cpf: item.cpf || cpfLimpo
             }));
 
             let totalFaturadoCalc = 0;
@@ -1162,6 +1293,255 @@
             toast('Erro ao consultar histórico', false);
           })
           .apiGetHistorico({ token: TOKEN, cpf: cpfLimpo });
+      }
+
+      function limparHistoricoPeriodoUI(){
+        HISTORICO_PERIODO_DATA = [];
+        HISTORICO_PERIODO_RESUMO = null;
+        const tbody = $('historicoPeriodoTableBody');
+        if (tbody) tbody.innerHTML = '';
+        const wrap = $('historicoPeriodoTableWrap');
+        if (wrap) wrap.style.display = 'none';
+        const empty = $('historicoPeriodoEmpty');
+        if (empty) empty.style.display = 'none';
+        atualizarHistoricoPeriodoResumo(null);
+      }
+
+      function atualizarHistoricoPeriodoResumo(resumo){
+        const wrap = $('historicoPeriodoResumo');
+        if (!wrap) return;
+
+        const intervaloEl = $('historicoPeriodoIntervalo');
+        const movEl = $('historicoPeriodoMovimentos');
+        const creditoEl = $('historicoPeriodoCredito');
+        const resgateEl = $('historicoPeriodoResgate');
+        const liquidoEl = $('historicoPeriodoLiquido');
+
+        if (!resumo){
+          wrap.style.display = 'none';
+          if (intervaloEl) intervaloEl.textContent = '-';
+          if (movEl) movEl.textContent = '0';
+          if (creditoEl) creditoEl.textContent = 'R$ 0,00';
+          if (resgateEl) resgateEl.textContent = 'R$ 0,00';
+          if (liquidoEl) liquidoEl.textContent = 'R$ 0,00';
+          return;
+        }
+
+        const inicioIso = resumo.periodoInicio || (HISTORICO_PERIODO_PARAM ? HISTORICO_PERIODO_PARAM.inicioIso : '');
+        const fimIso = resumo.periodoFim || (HISTORICO_PERIODO_PARAM ? HISTORICO_PERIODO_PARAM.fimIso : '');
+        const inicioFmt = inicioIso ? fmtDataDia(inicioIso) : '-';
+        const fimFmt = fimIso ? fmtDataDia(fimIso) : '-';
+
+        const movimentos = resumo.movimentos !== undefined ? Number(resumo.movimentos || 0) : 0;
+        const totalCredito = resumo.totalCredito !== undefined
+          ? Number(resumo.totalCredito || 0)
+          : (resumo.totalCreditoCentavos !== undefined ? Number(resumo.totalCreditoCentavos || 0) / 100 : 0);
+        const totalResgate = resumo.totalResgate !== undefined
+          ? Number(resumo.totalResgate || 0)
+          : (resumo.totalResgateCentavos !== undefined ? Number(resumo.totalResgateCentavos || 0) / 100 : 0);
+        const totalAjuste = resumo.totalAjuste !== undefined
+          ? Number(resumo.totalAjuste || 0)
+          : (resumo.totalAjusteCentavos !== undefined ? Number(resumo.totalAjusteCentavos || 0) / 100 : 0);
+        const totalLiquido = resumo.totalLiquido !== undefined
+          ? Number(resumo.totalLiquido || 0)
+          : (resumo.totalLiquidoCentavos !== undefined ? Number(resumo.totalLiquidoCentavos || 0) / 100 : 0);
+
+        const resgateEAjustes = totalResgate + (totalAjuste < 0 ? Math.abs(totalAjuste) : 0);
+
+        if (intervaloEl) intervaloEl.textContent = `${inicioFmt} — ${fimFmt}`;
+        if (movEl) movEl.textContent = movimentos;
+        if (creditoEl) creditoEl.textContent = 'R$ ' + fmtBR(totalCredito);
+        if (resgateEl) resgateEl.textContent = 'R$ ' + fmtBR(resgateEAjustes);
+        if (liquidoEl) liquidoEl.textContent = 'R$ ' + fmtBR(totalLiquido);
+
+        wrap.style.display = 'grid';
+      }
+
+      function atualizarHistoricoPeriodoTabela(){
+        const tbody = $('historicoPeriodoTableBody');
+        const wrap = $('historicoPeriodoTableWrap');
+        const empty = $('historicoPeriodoEmpty');
+        if (!tbody || !wrap || !empty) return;
+
+        tbody.innerHTML = '';
+
+        HISTORICO_PERIODO_DATA.forEach(item => {
+          const tipo = String(item.tipo || '').toUpperCase();
+          const badge = historicoBadge(tipo);
+          const tr = document.createElement('tr');
+
+          const dataFmt = fmtDataHoraBR(item.data);
+          const dataTexto = dataFmt !== '-' ? dataFmt : (item.dataDisplay || '-');
+          const cpfTexto = item.cpf ? formatCPF(item.cpf) : '-';
+
+          const compraVal = (tipo === 'CREDITO' && item.valorCompra !== null && item.valorCompra !== undefined)
+            ? 'R$ ' + fmtBR(item.valorCompra || 0)
+            : '—';
+
+          let valorTexto;
+          const valorNumero = Number(item.valor || 0);
+          if (tipo === 'CREDITO'){
+            valorTexto = 'R$ ' + fmtBR(valorNumero);
+          } else if (tipo === 'RESGATE'){
+            valorTexto = 'R$ ' + fmtBR(Math.abs(valorNumero));
+          } else {
+            const sinal = valorNumero >= 0 ? '+' : '-';
+            valorTexto = `${sinal} R$ ${fmtBR(Math.abs(valorNumero))}`;
+          }
+
+          tr.innerHTML = `
+            <td>${dataTexto}</td>
+            <td>${cpfTexto}</td>
+            <td><span class="${badge.className}">${badge.label}</span></td>
+            <td>${compraVal}</td>
+            <td>${valorTexto}</td>
+            <td>${item.operador || '-'}</td>
+            <td>${item.nota || '-'}</td>
+            <td></td>
+          `;
+
+          const actionsTd = tr.lastElementChild;
+          if (actionsTd){
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'btn btn-ghost btn-small';
+            cancelBtn.type = 'button';
+            cancelBtn.textContent = 'Cancelar';
+            cancelBtn.addEventListener('click', () => {
+              const descricao = `${dataTexto} • ${badge.label} (${cpfTexto})`;
+              confirmarCancelamentoTransacao({
+                rowIndex: item.rowIndex,
+                cpf: item.cpf,
+                descricao,
+                contexto: 'historico-periodo'
+              });
+            });
+            actionsTd.appendChild(cancelBtn);
+          }
+
+          tbody.appendChild(tr);
+        });
+
+        if (HISTORICO_PERIODO_DATA.length){
+          wrap.style.display = 'block';
+          empty.style.display = 'none';
+        } else {
+          wrap.style.display = 'none';
+          empty.style.display = 'block';
+        }
+      }
+
+      function buscarHistoricoPeriodo(reload=false){
+        const status = $('historicoPeriodoStatus');
+        const btn = $('btnHistoricoPeriodo');
+        const inicioInput = $('historicoInicio');
+        const fimInput = $('historicoFim');
+
+        let inicioIso;
+        let fimIso;
+        let inicioValor;
+        let fimValor;
+
+        if (reload){
+          if (!HISTORICO_PERIODO_PARAM){
+            if (status) status.textContent = 'Selecione um período para consultar.';
+            return;
+          }
+          ({ inicioIso, fimIso, inicioValor, fimValor } = HISTORICO_PERIODO_PARAM);
+        } else {
+          inicioValor = inicioInput ? inicioInput.value : '';
+          fimValor = fimInput ? fimInput.value : '';
+
+          if (!inicioValor || !fimValor){
+            if (status) status.textContent = 'Informe as datas inicial e final.';
+            toast('Informe as datas inicial e final.', false);
+            return;
+          }
+
+          const inicioDate = new Date(`${inicioValor}T00:00:00`);
+          const fimDate = new Date(`${fimValor}T23:59:59`);
+
+          if (isNaN(inicioDate) || isNaN(fimDate)){
+            if (status) status.textContent = 'Datas inválidas. Verifique o período informado.';
+            toast('Datas inválidas. Verifique o período informado.', false);
+            return;
+          }
+
+          if (fimDate.getTime() < inicioDate.getTime()){
+            if (status) status.textContent = 'A data final deve ser igual ou posterior à inicial.';
+            toast('A data final deve ser igual ou posterior à inicial.', false);
+            return;
+          }
+
+          inicioIso = inicioDate.toISOString();
+          fimIso = fimDate.toISOString();
+
+          HISTORICO_PERIODO_PARAM = {
+            inicioIso,
+            fimIso,
+            inicioValor,
+            fimValor
+          };
+        }
+
+        if (status) status.textContent = reload ? 'Atualizando período selecionado...' : 'Consultando histórico do período...';
+        if (btn) btn.disabled = true;
+
+        limparHistoricoPeriodoUI();
+
+        google.script.run
+          .withSuccessHandler(r => {
+            if (btn) btn.disabled = false;
+
+            if (!r || !r.ok){
+              if (isSessionError(r)) { forceRelog(r && r.msg ? r.msg : 'Sessão expirada.'); return; }
+              if (status) status.textContent = (r && r.msg) ? r.msg : 'Erro ao consultar histórico do período.';
+              toast((r && r.msg) ? r.msg : 'Erro ao consultar histórico do período', false);
+              return;
+            }
+
+            const historico = Array.isArray(r.historico) ? r.historico : [];
+            HISTORICO_PERIODO_DATA = historico.map(item => ({
+              data: item.data || item.dataISO || item.timestamp || '',
+              dataDisplay: item.dataDisplay || item.dataTexto || '',
+              tipo: item.tipo,
+              cpf: item.cpf || '',
+              valor: Number(item.valor !== undefined ? item.valor : (item.valorCentavos !== undefined ? item.valorCentavos / 100 : 0)),
+              valorCentavos: item.valorCentavos !== undefined ? Number(item.valorCentavos || 0) : undefined,
+              valorCompra: item.valorCompra === null || item.valorCompra === undefined
+                ? null
+                : Number(item.valorCompra || 0),
+              valorCompraCentavos: item.valorCompraCentavos === null || item.valorCompraCentavos === undefined
+                ? null
+                : Number(item.valorCompraCentavos || 0),
+              operador: item.operador || '',
+              nota: item.nota || '',
+              observacoes: item.observacoes || '',
+              rowIndex: Number(item.rowIndex || 0)
+            }));
+
+            HISTORICO_PERIODO_RESUMO = r.resumo || null;
+            atualizarHistoricoPeriodoResumo(HISTORICO_PERIODO_RESUMO);
+            atualizarHistoricoPeriodoTabela();
+
+            if (status){
+              if (HISTORICO_PERIODO_DATA.length){
+                const inicioFmt = HISTORICO_PERIODO_PARAM ? fmtDataDia(HISTORICO_PERIODO_PARAM.inicioIso) : 'início';
+                const fimFmt = HISTORICO_PERIODO_PARAM ? fmtDataDia(HISTORICO_PERIODO_PARAM.fimIso) : 'fim';
+                const movCount = HISTORICO_PERIODO_DATA.length;
+                const plural = movCount > 1 ? 'movimentações' : 'movimentação';
+                status.textContent = `${movCount} ${plural} entre ${inicioFmt} e ${fimFmt}.`;
+              } else {
+                status.textContent = 'Nenhuma transação encontrada para o período selecionado.';
+              }
+            }
+          })
+          .withFailureHandler(e => {
+            if (btn) btn.disabled = false;
+            if (isSessionError(e)) { forceRelog('Sua sessão expirou.'); return; }
+            if (status) status.textContent = 'Erro ao consultar histórico do período.';
+            toast('Erro ao consultar histórico do período', false);
+          })
+          .apiGetHistoricoPeriodo({ token: TOKEN, inicio: inicioIso, fim: fimIso });
       }
 
     </script>
