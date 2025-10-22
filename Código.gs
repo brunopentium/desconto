@@ -504,38 +504,102 @@ function apiGetHistorico(payload){
     requireAuth(token);
     const cpfDigitado = String(payload.cpf || '');
     const cpf = _normCPF(cpfDigitado);
-    
+
+    if (!cpf || cpf.length !== 11){
+      return { ok:false, msg:'CPF inválido para consulta.' };
+    }
+
     Logger.log('Buscando histórico para CPF: ' + cpf);
-    
+
     const txSheet = SHEET_TX;
     const lastRow = txSheet.getLastRow();
     const historico = [];
+    let totalFaturadoCent = 0;
+    let totalGeradoCent = 0;
+    let totalResgatadoCent = 0;
 
     if (lastRow > 1) {
-      const cpfRange = txSheet.getRange(2, 3, lastRow - 1, 1);
-      const finder = cpfRange.createTextFinder(cpf).matchEntireCell(true);
-      const matches = finder ? finder.findAll() : [];
+      const linhas = txSheet.getRange(2, 1, lastRow - 1, 8).getValues();
+      const tz = Session.getScriptTimeZone();
 
-      matches.forEach(cell => {
-        const rowValues = txSheet.getRange(cell.getRow(), 1, 1, 8).getValues()[0];
-        if (!rowValues || !rowValues[0]) return; // ignora linhas vazias
+      for (let i = 0; i < linhas.length; i++){
+        const row = linhas[i];
+        const rowCpf = _normCPF(row[2]);
+        if (!rowCpf || rowCpf !== cpf) continue;
+
+        const tipo = String(row[1] || '').toUpperCase();
+        const valorCentavos = Number(row[3]) || 0;
+        const valorCompraCent = (row[4] === null || row[4] === '') ? null : Number(row[4]) || 0;
+        const operador = String(row[5] || '');
+        const nota = String(row[6] || '');
+        const observacoes = String(row[7] || '');
+
+        let dataISO = '';
+        let dataDisplay = '';
+        const timestamp = row[0];
+        if (timestamp instanceof Date){
+          dataISO = timestamp.toISOString();
+          dataDisplay = Utilities.formatDate(timestamp, tz, "dd/MM/yyyy HH:mm:ss");
+        } else if (timestamp){
+          const parsed = new Date(timestamp);
+          if (!isNaN(parsed.getTime())){
+            dataISO = parsed.toISOString();
+            dataDisplay = Utilities.formatDate(parsed, tz, "dd/MM/yyyy HH:mm:ss");
+          } else {
+            const txt = String(timestamp);
+            const parts = txt.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+            if (parts){
+              const dia = Number(parts[1]);
+              const mes = Number(parts[2]);
+              const ano = Number(parts[3]);
+              const hora = Number(parts[4] || 0);
+              const minuto = Number(parts[5] || 0);
+              const segundo = Number(parts[6] || 0);
+              const manual = new Date(ano, mes - 1, dia, hora, minuto, segundo);
+              if (!isNaN(manual.getTime())){
+                dataISO = manual.toISOString();
+                dataDisplay = Utilities.formatDate(manual, tz, "dd/MM/yyyy HH:mm:ss");
+              } else {
+                dataDisplay = txt;
+              }
+            } else {
+              dataDisplay = txt;
+            }
+          }
+        }
+
+        if (tipo === 'CREDITO'){
+          if (valorCompraCent !== null) totalFaturadoCent += Math.max(0, valorCompraCent);
+          totalGeradoCent += Math.max(0, valorCentavos);
+        } else if (tipo === 'RESGATE'){
+          totalResgatadoCent += Math.abs(valorCentavos);
+        } else {
+          if (valorCentavos >= 0) totalGeradoCent += valorCentavos;
+          else totalResgatadoCent += Math.abs(valorCentavos);
+        }
 
         historico.push({
-          data: rowValues[0],
-          tipo: String(rowValues[1] || ''),
-          valor: (Number(rowValues[3]) || 0) / 100,
-          valorCompra: rowValues[4] ? (Number(rowValues[4]) / 100) : null,
-          operador: String(rowValues[5] || ''),
-          nota: String(rowValues[6] || '')
+          data: dataISO || dataDisplay || '',
+          dataDisplay,
+          tipo,
+          valorCentavos,
+          valor: valorCentavos / 100,
+          valorCompraCentavos: valorCompraCent,
+          valorCompra: valorCompraCent === null ? null : (valorCompraCent / 100),
+          operador,
+          nota,
+          observacoes
         });
-      });
+      }
 
       Logger.log('Encontradas ' + historico.length + ' transações');
 
       historico.sort((a, b) => {
-        const dateA = new Date(a.data);
-        const dateB = new Date(b.data);
-        return dateB - dateA;
+        const aDate = new Date(a.data);
+        const bDate = new Date(b.data);
+        const aTime = isNaN(aDate) ? 0 : aDate.getTime();
+        const bTime = isNaN(bDate) ? 0 : bDate.getTime();
+        return bTime - aTime;
       });
     } else {
       Logger.log('Transactions sheet sem dados além do cabeçalho.');
@@ -544,12 +608,27 @@ function apiGetHistorico(payload){
     const cliente = _getCustomer(cpf);
     const saldo = _saldoAtualElegivel_(cpf);
     _setCustomerBalance(cpf, saldo); // mantém espelho coerente
-    
+
+    const resumo = {
+      cpf,
+      nome: cliente.nome,
+      saldoCentavos: saldo,
+      saldoAtual: saldo / 100,
+      totalFaturadoCentavos: totalFaturadoCent,
+      totalFaturado: totalFaturadoCent / 100,
+      totalGeradoCentavos: totalGeradoCent,
+      totalGerado: totalGeradoCent / 100,
+      totalResgatadoCentavos: totalResgatadoCent,
+      totalResgatado: totalResgatadoCent / 100,
+      movimentos: historico.length
+    };
+
     return {
       ok: true,
       cpf,
       nome: cliente.nome,
       saldoAtual: saldo / 100,
+      resumo,
       historico
     };
   } catch (e) {

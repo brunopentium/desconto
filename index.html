@@ -943,13 +943,27 @@
           return;
         }
 
+        const saldoAtual = resumo.saldoAtual !== undefined
+          ? Number(resumo.saldoAtual || 0)
+          : (resumo.saldoCentavos !== undefined ? Number(resumo.saldoCentavos || 0) / 100 : 0);
+        const totalFaturado = resumo.totalFaturado !== undefined
+          ? Number(resumo.totalFaturado || 0)
+          : (resumo.totalFaturadoCentavos !== undefined ? Number(resumo.totalFaturadoCentavos || 0) / 100 : 0);
+        const totalGerado = resumo.totalGerado !== undefined
+          ? Number(resumo.totalGerado || 0)
+          : (resumo.totalGeradoCentavos !== undefined ? Number(resumo.totalGeradoCentavos || 0) / 100 : 0);
+        const totalResgatado = resumo.totalResgatado !== undefined
+          ? Number(resumo.totalResgatado || 0)
+          : (resumo.totalResgatadoCentavos !== undefined ? Number(resumo.totalResgatadoCentavos || 0) / 100 : 0);
+        const movimentos = resumo.movimentos !== undefined ? Number(resumo.movimentos || 0) : 0;
+
         if (nomeEl) nomeEl.textContent = resumo.nome || '—';
         if (cpfEl) cpfEl.textContent = resumo.cpf ? formatCPF(resumo.cpf) : 'CPF não informado';
-        if (saldoEl) saldoEl.textContent = 'R$ ' + fmtBR(resumo.saldoAtual || 0);
-        if (faturadoEl) faturadoEl.textContent = 'R$ ' + fmtBR(resumo.totalFaturado || 0);
-        if (geradoEl) geradoEl.textContent = 'R$ ' + fmtBR(resumo.totalGerado || 0);
-        if (resgatadoEl) resgatadoEl.textContent = 'R$ ' + fmtBR(resumo.totalResgatado || 0);
-        if (movEl) movEl.textContent = resumo.movimentos || 0;
+        if (saldoEl) saldoEl.textContent = 'R$ ' + fmtBR(saldoAtual);
+        if (faturadoEl) faturadoEl.textContent = 'R$ ' + fmtBR(totalFaturado);
+        if (geradoEl) geradoEl.textContent = 'R$ ' + fmtBR(totalGerado);
+        if (resgatadoEl) resgatadoEl.textContent = 'R$ ' + fmtBR(totalResgatado);
+        if (movEl) movEl.textContent = movimentos;
 
         wrap.style.display = 'grid';
       }
@@ -967,6 +981,9 @@
           const badge = historicoBadge(tipo);
           const tr = document.createElement('tr');
 
+          const dataFmt = fmtDataHoraBR(item.data);
+          const dataTexto = dataFmt !== '-' ? dataFmt : (item.dataDisplay || '-');
+
           const compraVal = (tipo === 'CREDITO' && item.valorCompra !== null && item.valorCompra !== undefined)
             ? 'R$ ' + fmtBR(item.valorCompra || 0)
             : '—';
@@ -983,7 +1000,7 @@
           }
 
           tr.innerHTML = `
-            <td>${fmtDataHoraBR(item.data)}</td>
+            <td>${dataTexto}</td>
             <td><span class="${badge.className}">${badge.label}</span></td>
             <td>${compraVal}</td>
             <td>${valorTexto}</td>
@@ -1045,51 +1062,94 @@
             const historico = Array.isArray(r.historico) ? r.historico : [];
 
             HISTORICO_DATA = historico.map(item => ({
-              data: item.data,
+              data: item.data || item.dataISO || item.timestamp || '',
+              dataDisplay: item.dataDisplay || item.dataTexto || '',
               tipo: item.tipo,
-              valor: Number(item.valor || 0),
-              valorCompra: item.valorCompra === null || item.valorCompra === undefined ? null : Number(item.valorCompra || 0),
+              valor: Number(item.valor !== undefined ? item.valor : (item.valorCentavos !== undefined ? item.valorCentavos / 100 : 0)),
+              valorCentavos: item.valorCentavos !== undefined ? Number(item.valorCentavos || 0) : undefined,
+              valorCompra: item.valorCompra === null || item.valorCompra === undefined
+                ? null
+                : Number(item.valorCompra || 0),
+              valorCompraCentavos: item.valorCompraCentavos === null || item.valorCompraCentavos === undefined
+                ? null
+                : Number(item.valorCompraCentavos || 0),
               operador: item.operador || '',
-              nota: item.nota || ''
+              nota: item.nota || '',
+              observacoes: item.observacoes || ''
             }));
 
-            let totalFaturado = 0;
-            let totalGerado = 0;
-            let totalResgatado = 0;
+            let totalFaturadoCalc = 0;
+            let totalGeradoCalc = 0;
+            let totalResgatadoCalc = 0;
 
             HISTORICO_DATA.forEach(item => {
               const tipo = String(item.tipo || '').toUpperCase();
+              const valorNumero = Number(item.valor || 0);
               if (tipo === 'CREDITO'){
                 if (item.valorCompra !== null && item.valorCompra !== undefined){
-                  totalFaturado += Number(item.valorCompra || 0);
+                  totalFaturadoCalc += Number(item.valorCompra || 0);
                 }
-                totalGerado += Number(item.valor || 0);
+                totalGeradoCalc += valorNumero;
               } else if (tipo === 'RESGATE'){
-                totalResgatado += Math.abs(Number(item.valor || 0));
+                totalResgatadoCalc += Math.abs(valorNumero);
               } else {
-                const valorNumero = Number(item.valor || 0);
-                if (valorNumero >= 0) totalGerado += valorNumero;
-                else totalResgatado += Math.abs(valorNumero);
+                if (valorNumero >= 0) totalGeradoCalc += valorNumero;
+                else totalResgatadoCalc += Math.abs(valorNumero);
               }
             });
 
+            const resumoResposta = r.resumo || {};
+
+            const saldoAtual = resumoResposta.saldoAtual !== undefined
+              ? Number(resumoResposta.saldoAtual || 0)
+              : (resumoResposta.saldoCentavos !== undefined
+                  ? Number(resumoResposta.saldoCentavos || 0) / 100
+                  : Number(r.saldoAtual || 0));
+
+            const totalFaturado = resumoResposta.totalFaturado !== undefined
+              ? Number(resumoResposta.totalFaturado || 0)
+              : (resumoResposta.totalFaturadoCentavos !== undefined
+                  ? Number(resumoResposta.totalFaturadoCentavos || 0) / 100
+                  : totalFaturadoCalc);
+
+            const totalGerado = resumoResposta.totalGerado !== undefined
+              ? Number(resumoResposta.totalGerado || 0)
+              : (resumoResposta.totalGeradoCentavos !== undefined
+                  ? Number(resumoResposta.totalGeradoCentavos || 0) / 100
+                  : totalGeradoCalc);
+
+            const totalResgatado = resumoResposta.totalResgatado !== undefined
+              ? Number(resumoResposta.totalResgatado || 0)
+              : (resumoResposta.totalResgatadoCentavos !== undefined
+                  ? Number(resumoResposta.totalResgatadoCentavos || 0) / 100
+                  : totalResgatadoCalc);
+
+            const movimentos = resumoResposta.movimentos !== undefined
+              ? Number(resumoResposta.movimentos || 0)
+              : HISTORICO_DATA.length;
+
             HISTORICO_RESUMO = {
-              cpf: r.cpf,
-              nome: r.nome,
-              saldoAtual: Number(r.saldoAtual || 0),
+              cpf: resumoResposta.cpf || r.cpf || cpfLimpo,
+              nome: resumoResposta.nome !== undefined ? resumoResposta.nome : (r.nome || ''),
+              saldoAtual,
+              saldoCentavos: resumoResposta.saldoCentavos !== undefined ? Number(resumoResposta.saldoCentavos || 0) : undefined,
               totalFaturado,
+              totalFaturadoCentavos: resumoResposta.totalFaturadoCentavos !== undefined ? Number(resumoResposta.totalFaturadoCentavos || 0) : undefined,
               totalGerado,
+              totalGeradoCentavos: resumoResposta.totalGeradoCentavos !== undefined ? Number(resumoResposta.totalGeradoCentavos || 0) : undefined,
               totalResgatado,
-              movimentos: HISTORICO_DATA.length
+              totalResgatadoCentavos: resumoResposta.totalResgatadoCentavos !== undefined ? Number(resumoResposta.totalResgatadoCentavos || 0) : undefined,
+              movimentos
             };
 
             atualizarHistoricoResumo(HISTORICO_RESUMO);
             atualizarHistoricoTabela();
 
             if (status){
-              if (HISTORICO_DATA.length){
-                const plural = HISTORICO_DATA.length > 1 ? 'movimentações' : 'movimentação';
-                status.textContent = `${HISTORICO_DATA.length} ${plural} encontradas.`;
+              const movCount = HISTORICO_RESUMO ? Number(HISTORICO_RESUMO.movimentos || 0) : HISTORICO_DATA.length;
+              if (movCount > 0){
+                const plural = movCount > 1 ? 'movimentações' : 'movimentação';
+                status.textContent = `${movCount} ${plural} encontradas.`;
               } else {
                 status.textContent = 'Nenhuma movimentação encontrada para este CPF.';
               }
