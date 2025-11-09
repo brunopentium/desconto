@@ -43,6 +43,145 @@ function ensureDefaultUser(sheet){
   }
 }
 
+function _normalizeHeaderKey(value){
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '')
+    .trim();
+}
+
+const GASTO_SHEET_CONFIG = [
+  {
+    key: 'debito',
+    display: 'Débitos/Pix',
+    candidates: ['Débitos/Pix', 'Debitos/Pix', 'Débitos Pix', 'Debitos Pix', 'Débito/Pix', 'Debito/Pix']
+  },
+  {
+    key: 'cartao',
+    display: 'Cartão de Crédito',
+    candidates: ['Cartão de Crédito', 'Cartao de Credito', 'Cartão Credito', 'Cartao Credito', 'Cartão', 'Cartao']
+  }
+];
+
+const GASTO_HEADER_ALIAS_SOURCE = {
+  data: ['data', 'dia', 'datacompra', 'datagasto', 'lancamento', 'lançamento', 'dataregistro'],
+  descricao: ['descricao', 'descrição', 'historico', 'histórico', 'detalhe', 'detalhes', 'referencia', 'referência', 'texto'],
+  categoria: ['categoria', 'grupo', 'classificacao', 'classificação', 'tipo', 'categoria1'],
+  subcategoria: ['subcategoria', 'sub-categoria', 'subcategoria2', 'etiqueta', 'tag'],
+  valor: ['valor', 'valorcompra', 'valorliquido', 'total', 'valorgasto', 'valorfinal', 'valor(r$)', 'valorbrl'],
+  responsavel: ['responsavel', 'responsável', 'quem', 'quemgastou', 'pagador', 'pessoa', 'titular'],
+  observacao: ['observacao', 'observação', 'obs', 'nota', 'comentario', 'comentário']
+};
+
+const GASTO_HEADER_ALIASES = (function(){
+  const aliases = {};
+  for (const key in GASTO_HEADER_ALIAS_SOURCE){
+    const list = GASTO_HEADER_ALIAS_SOURCE[key] || [];
+    const normalized = list.map(_normalizeHeaderKey);
+    normalized.push(_normalizeHeaderKey(key));
+    aliases[key] = Array.from(new Set(normalized));
+  }
+  return aliases;
+})();
+
+function _mapHeaderToCanonical(header){
+  const norm = _normalizeHeaderKey(header);
+  if (!norm) return '';
+  for (const key in GASTO_HEADER_ALIASES){
+    if (GASTO_HEADER_ALIASES[key].indexOf(norm) !== -1) return key;
+  }
+  return '';
+}
+
+function _buildGastoHeaderIndex(headers){
+  const index = {};
+  headers.forEach((head, idx) => {
+    const canon = _mapHeaderToCanonical(head);
+    if (canon && index[canon] === undefined){
+      index[canon] = idx;
+    }
+  });
+  return index;
+}
+
+function _parseSheetDateValue(value){
+  if (value === null || value === undefined || value === '') return null;
+  if (value instanceof Date && !isNaN(value)) return value;
+  if (typeof value === 'number'){
+    const base = new Date(Math.round((value - 25569) * 86400000));
+    if (!isNaN(base)) return base;
+  }
+  const str = String(value).trim();
+  if (!str) return null;
+  const isoMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (isoMatch){
+    const year = Number(isoMatch[1]);
+    const month = Number(isoMatch[2]) - 1;
+    const day = Number(isoMatch[3]);
+    const d = new Date(year, month, day);
+    return isNaN(d) ? null : d;
+  }
+  const brMatch = str.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
+  if (brMatch){
+    const day = Number(brMatch[1]);
+    const month = Number(brMatch[2]) - 1;
+    let year = Number(brMatch[3]);
+    if (year < 100) year += 2000;
+    const d = new Date(year, month, day);
+    return isNaN(d) ? null : d;
+  }
+  return null;
+}
+
+function _parseSheetCurrencyValue(value){
+  if (value === null || value === undefined || value === '') return 0;
+  if (typeof value === 'number') return Number(value);
+  const str = String(value).trim();
+  if (!str) return 0;
+  const clean = str
+    .replace(/\s+/g, '')
+    .replace(/\./g, '')
+    .replace(/,/g, '.');
+  const num = parseFloat(clean);
+  return isNaN(num) ? 0 : num;
+}
+
+function _safeString(value){
+  return value === null || value === undefined ? '' : String(value).trim();
+}
+
+function _findSheetCandidate(candidates){
+  for (let i = 0; i < candidates.length; i++){
+    const name = candidates[i];
+    if (!name) continue;
+    const sheet = SS.getSheetByName(name);
+    if (sheet) return sheet;
+  }
+  return null;
+}
+
+function _parseFilterDate(value, isEnd){
+  if (!value) return null;
+  const str = String(value).trim();
+  if (!str) return null;
+  const parts = str.split('-');
+  if (parts.length < 3) return null;
+  const year = Number(parts[0]);
+  const month = Number(parts[1]) - 1;
+  const day = Number(parts[2]);
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return null;
+  const d = new Date(year, month, day);
+  if (isNaN(d)) return null;
+  if (isEnd){
+    d.setHours(23, 59, 59, 999);
+  } else {
+    d.setHours(0, 0, 0, 0);
+  }
+  return d;
+}
+
 const SHEET_SETTINGS   = ensureSheet('Settings', ['key', 'value', 'descricao']);
 const SHEET_CUSTOMERS  = ensureSheet('Customers', ['cpf', 'nome', 'telefone', 'saldo_centavos', 'ultimo_uso', 'criado_em']);
 const SHEET_TX         = ensureSheet('Transactions', ['timestamp', 'tipo', 'cpf', 'valor_centavos', 'valor_compra_centavos', 'operador', 'nota_ref', 'observacoes']);
@@ -1149,6 +1288,207 @@ function apiGetClientesRelatorio(payload){
   } catch (e) {
     Logger.log('ERRO apiGetClientesRelatorio: ' + e.message);
     return { ok: false, msg: e.message };
+  }
+}
+
+function apiGetGastos(payload){
+  try {
+    const token = String(payload.token || '');
+    requireAuth(token);
+
+    const filtroTipo = _normalizeHeaderKey(payload.tipo || '');
+    const filtroCategoria = _normalizeHeaderKey(payload.categoria || '');
+    const filtroResponsavel = _normalizeHeaderKey(payload.responsavel || '');
+    const filtroTexto = String(payload.texto || '').trim().toLowerCase();
+    const dataInicio = _parseFilterDate(payload.startDate, false);
+    const dataFim = _parseFilterDate(payload.endDate, true);
+
+    const tz = Session.getScriptTimeZone();
+    const itens = [];
+    const categoriasSet = new Set();
+    const responsaveisSet = new Set();
+    const warnings = [];
+
+    GASTO_SHEET_CONFIG.forEach(config => {
+      const sheet = _findSheetCandidate(config.candidates);
+      if (!sheet){
+        warnings.push('Aba "' + config.display + '" não encontrada.');
+        return;
+      }
+
+      const raw = sheet.getDataRange().getValues();
+      if (!raw || raw.length <= 1) return;
+
+      const headerRow = raw[0].map(h => String(h || '').trim());
+      const headerIndex = _buildGastoHeaderIndex(headerRow);
+
+      if (headerIndex.valor === undefined){
+        warnings.push('Aba "' + sheet.getName() + '" sem coluna de valor identificável.');
+      }
+      if (headerIndex.data === undefined){
+        warnings.push('Aba "' + sheet.getName() + '" sem coluna de data identificável.');
+      }
+
+      for (let i = 1; i < raw.length; i++){
+        const row = raw[i];
+        if (!row) continue;
+        const rowIndex = i + 1;
+        const isEmpty = row.every(cell => cell === null || cell === '');
+        if (isEmpty) continue;
+
+        const dataCell = headerIndex.data !== undefined ? row[headerIndex.data] : '';
+        const dataObj = _parseSheetDateValue(dataCell);
+        const dataIso = dataObj && !isNaN(dataObj) ? dataObj.toISOString() : '';
+        const dataDisplay = dataObj && !isNaN(dataObj)
+          ? Utilities.formatDate(dataObj, tz, 'dd/MM/yyyy')
+          : '';
+
+        const categoria = headerIndex.categoria !== undefined ? _safeString(row[headerIndex.categoria]) : '';
+        const subcategoria = headerIndex.subcategoria !== undefined ? _safeString(row[headerIndex.subcategoria]) : '';
+        const descricao = headerIndex.descricao !== undefined ? _safeString(row[headerIndex.descricao]) : '';
+        const responsavel = headerIndex.responsavel !== undefined ? _safeString(row[headerIndex.responsavel]) : '';
+        const observacao = headerIndex.observacao !== undefined ? _safeString(row[headerIndex.observacao]) : '';
+        const valor = headerIndex.valor !== undefined ? _parseSheetCurrencyValue(row[headerIndex.valor]) : 0;
+
+        if (categoria) categoriasSet.add(categoria);
+        if (responsavel) responsaveisSet.add(responsavel);
+
+        itens.push({
+          id: config.key + '-' + sheet.getName() + '-' + rowIndex,
+          tipo: config.key,
+          tipoLabel: config.display,
+          sheetName: sheet.getName(),
+          rowIndex,
+          dataObj,
+          dataIso,
+          dataDisplay,
+          categoria,
+          subcategoria,
+          descricao,
+          valor: Number(valor || 0),
+          responsavel,
+          observacao
+        });
+      }
+    });
+
+    const filtered = itens.filter(item => {
+      if (filtroTipo && item.tipo !== filtroTipo) return false;
+
+      if (dataInicio && (!item.dataObj || item.dataObj < dataInicio)) return false;
+      if (dataFim && (!item.dataObj || item.dataObj > dataFim)) return false;
+
+      if (filtroCategoria){
+        const cat = _normalizeHeaderKey(item.categoria);
+        const subcat = _normalizeHeaderKey(item.subcategoria);
+        if (cat !== filtroCategoria && subcat !== filtroCategoria) return false;
+      }
+
+      if (filtroResponsavel){
+        const resp = _normalizeHeaderKey(item.responsavel);
+        if (resp !== filtroResponsavel) return false;
+      }
+
+      if (filtroTexto){
+        const alvo = [item.descricao, item.observacao, item.categoria, item.subcategoria]
+          .map(v => String(v || '').toLowerCase())
+          .join(' ');
+        if (!alvo.includes(filtroTexto)) return false;
+      }
+
+      return true;
+    });
+
+    filtered.sort((a, b) => {
+      const aTime = a.dataObj ? a.dataObj.getTime() : 0;
+      const bTime = b.dataObj ? b.dataObj.getTime() : 0;
+      if (bTime !== aTime) return bTime - aTime;
+      if (a.tipo !== b.tipo) return a.tipo.localeCompare(b.tipo, 'pt-BR');
+      return (a.rowIndex || 0) - (b.rowIndex || 0);
+    });
+
+    let totalValor = 0;
+    const datasValidas = [];
+    filtered.forEach(item => {
+      const valor = Number(item.valor || 0);
+      totalValor += valor;
+      if (item.dataObj && !isNaN(item.dataObj.getTime())){
+        datasValidas.push(item.dataObj.getTime());
+      }
+    });
+
+    let dataMin = null, dataMax = null;
+    if (datasValidas.length){
+      dataMin = new Date(Math.min.apply(null, datasValidas));
+      dataMax = new Date(Math.max.apply(null, datasValidas));
+    }
+
+    const dataResponse = filtered.map(item => ({
+      id: item.id,
+      tipo: item.tipo,
+      tipoLabel: item.tipoLabel,
+      sheetName: item.sheetName,
+      rowIndex: item.rowIndex,
+      data: item.dataIso || '',
+      dataDisplay: item.dataDisplay || '',
+      categoria: item.categoria || '',
+      subcategoria: item.subcategoria || '',
+      descricao: item.descricao || '',
+      valor: Number(item.valor || 0),
+      responsavel: item.responsavel || '',
+      observacao: item.observacao || ''
+    }));
+
+    const meta = {
+      categorias: Array.from(categoriasSet).filter(Boolean).sort((a, b) => a.localeCompare(b, 'pt-BR')),
+      responsaveis: Array.from(responsaveisSet).filter(Boolean).sort((a, b) => a.localeCompare(b, 'pt-BR')),
+      tipos: GASTO_SHEET_CONFIG.map(cfg => ({ key: cfg.key, label: cfg.display })),
+      resumo: {
+        quantidade: filtered.length,
+        totalValor,
+        primeiroISO: dataMin ? dataMin.toISOString() : '',
+        primeiroDisplay: dataMin ? Utilities.formatDate(dataMin, tz, 'dd/MM/yyyy') : '',
+        ultimoISO: dataMax ? dataMax.toISOString() : '',
+        ultimoDisplay: dataMax ? Utilities.formatDate(dataMax, tz, 'dd/MM/yyyy') : '',
+        filtroInicio: dataInicio ? dataInicio.toISOString() : '',
+        filtroFim: dataFim ? dataFim.toISOString() : ''
+      }
+    };
+
+    return { ok: true, data: dataResponse, meta, warnings };
+  } catch (e) {
+    return { ok:false, msg:e.message };
+  }
+}
+
+function apiDeleteGasto(payload){
+  const lock = LockService.getScriptLock();
+  const locked = lock.tryLock(20000);
+  if (!locked){
+    return { ok:false, msg:'Sistema temporariamente ocupado. Tente novamente.' };
+  }
+  try {
+    const token = String(payload.token || '');
+    requireAuth(token);
+
+    const sheetName = String(payload.sheetName || '').trim();
+    const rowIndex = Number(payload.rowIndex || 0);
+
+    if (!sheetName) return { ok:false, msg:'Aba inválida.' };
+    if (!rowIndex || rowIndex < 2) return { ok:false, msg:'Linha inválida.' };
+
+    const sheet = SS.getSheetByName(sheetName);
+    if (!sheet) return { ok:false, msg:'Aba não encontrada.' };
+
+    const lastRow = sheet.getLastRow();
+    if (rowIndex > lastRow) return { ok:false, msg:'Linha fora do intervalo.' };
+
+    sheet.deleteRow(rowIndex);
+    return { ok:true };
+  } catch (e) {
+    return { ok:false, msg:e.message };
+  } finally {
+    try { lock.releaseLock(); } catch (_) {}
   }
 }
 
