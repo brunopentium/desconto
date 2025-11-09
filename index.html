@@ -42,9 +42,11 @@
       
       label{display:block; margin:10px 0 6px; color:var(--subtle); font-size:13px}
       .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
-      input{flex:1 1 auto; min-width:180px; padding:12px 12px; border-radius:12px; color:var(--text); background:#0b221e; border:1px solid var(--muted); outline:none; transition:all .18s ease}
-      input::placeholder{color:#7fa69c} 
-      input:focus{border-color:var(--gold); box-shadow:0 0 0 3px rgba(212,175,55,.15)}
+      input, select{flex:1 1 auto; min-width:180px; padding:12px 12px; border-radius:12px; color:var(--text); background:#0b221e; border:1px solid var(--muted); outline:none; transition:all .18s ease}
+      input::placeholder{color:#7fa69c}
+      input:focus, select:focus{border-color:var(--gold); box-shadow:0 0 0 3px rgba(212,175,55,.15)}
+      select{cursor:pointer; appearance:none; background-image:linear-gradient(45deg, transparent 50%, var(--gold) 50%), linear-gradient(135deg, var(--gold) 50%, transparent 50%), linear-gradient(180deg, rgba(15,47,42,.6), rgba(15,47,42,.6)); background-position:calc(100% - 18px) calc(50% - 5px), calc(100% - 12px) calc(50% - 5px), center; background-size:6px 6px, 6px 6px, 100% 100%; background-repeat:no-repeat}
+      select option{color:#111}
       
       .actions{display:flex; gap:10px; align-items:center; margin-top:10px}
       .muted{color:var(--subtle); font-size:13px} 
@@ -74,6 +76,11 @@
       .badge-credit{background:rgba(94,221,168,.15); color:#5eddaa}
       .badge-resgate{background:rgba(255,92,92,.15); color:#ff5c5c}
       .badge-ajuste{background:rgba(100,150,255,.15); color:#6496ff}
+      .badge-gasto-debito{background:rgba(94,221,168,.18); color:#5eddaa}
+      .badge-gasto-cartao{background:rgba(100,150,255,.18); color:#82a8ff}
+
+      .btn-danger{color:#ff8181; background:rgba(255,129,129,.12); border:1px solid rgba(255,129,129,.45)}
+      .btn-danger:hover{background:rgba(255,129,129,.2)}
 
       /* Clientes */
       .client-card{display:flex; flex-direction:column; gap:18px}
@@ -81,7 +88,7 @@
       .client-header h3{margin:0; font-size:20px}
       .client-status{font-size:13px; color:var(--subtle)}
       .client-toolbar{display:flex; gap:12px; flex-wrap:wrap; align-items:center}
-      .client-toolbar input{max-width:280px}
+      .client-toolbar input, .client-toolbar select{max-width:280px}
       .client-metrics{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px}
       .metric{background:#0b221e; padding:12px 14px; border-radius:12px; border:1px solid var(--muted); display:flex; flex-direction:column; gap:4px}
       .metric-label{font-size:12px; color:var(--subtle); letter-spacing:.4px; text-transform:uppercase}
@@ -172,6 +179,7 @@
         <div class="tab" data-tab="dashboard" onclick="switchTab('dashboard')">Dashboard</div>
         <div class="tab" data-tab="clientes" onclick="switchTab('clientes')">Clientes</div>
         <div class="tab" data-tab="historico" onclick="switchTab('historico')">Histórico</div>
+        <div class="tab" data-tab="gastos" onclick="switchTab('gastos')">Lançamento Gastos</div>
       </div>
 
       <!-- TAB: OPERAÇÕES -->
@@ -462,6 +470,78 @@
         </div>
       </div>
 
+      <!-- TAB: GASTOS -->
+      <div id="tabGastos" class="tab-content" style="display:none">
+        <div class="card card-full client-card">
+          <div class="client-header">
+            <div>
+              <h3>Lançamento de gastos</h3>
+              <p class="muted">Combine os lançamentos das abas <strong>Débitos/Pix</strong> e <strong>Cartão de Crédito</strong>.</p>
+            </div>
+          </div>
+          <div class="client-toolbar" style="margin-top:0">
+            <input id="gastosDataInicio" type="date" />
+            <input id="gastosDataFim" type="date" />
+            <select id="gastosTipoFiltro">
+              <option value="">Todos os meios</option>
+              <option value="debito">Débitos/Pix</option>
+              <option value="cartao">Cartão de Crédito</option>
+            </select>
+            <select id="gastosCategoriaFiltro">
+              <option value="">Todas as categorias</option>
+            </select>
+            <select id="gastosPessoaFiltro">
+              <option value="">Todos os responsáveis</option>
+            </select>
+            <input id="gastosBusca" placeholder="Buscar por descrição ou observação" />
+            <button id="btnGastosCarregar" class="btn btn-primary" type="button" onclick="carregarGastos()">Carregar lançamentos</button>
+            <button class="btn btn-ghost" type="button" onclick="limparFiltrosGastos()">Limpar</button>
+          </div>
+          <div id="gastosStatus" class="client-status">Selecione um período e clique em "Carregar lançamentos".</div>
+          <div id="gastosAvisos" class="muted" style="display:none"></div>
+          <div id="gastosResumo" class="client-metrics" style="display:none">
+            <div class="metric">
+              <span class="metric-label">Lançamentos</span>
+              <span class="metric-value" id="gastosResumoQtd">0</span>
+              <span class="metric-sub">Registros encontrados</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Total</span>
+              <span class="metric-value" id="gastosResumoTotal">R$ 0,00</span>
+              <span class="metric-sub">Somatório filtrado</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Primeiro lançamento</span>
+              <span class="metric-value" id="gastosResumoInicio">-</span>
+              <span class="metric-sub">Data mais antiga</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Último lançamento</span>
+              <span class="metric-value" id="gastosResumoFim">-</span>
+              <span class="metric-sub">Data mais recente</span>
+            </div>
+          </div>
+          <div id="gastosEmpty" class="muted" style="display:none">Nenhum lançamento encontrado para os filtros informados.</div>
+          <div id="gastosTableWrap" class="table-wrap" style="display:none">
+            <table>
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Origem</th>
+                  <th>Categoria</th>
+                  <th>Responsável</th>
+                  <th>Descrição</th>
+                  <th>Valor</th>
+                  <th>Observações</th>
+                  <th>Ações</th>
+                </tr>
+              </thead>
+              <tbody id="gastosTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
     </div>
 
     <!-- MODAL -->
@@ -489,6 +569,9 @@
       let HISTORICO_PERIODO_DATA = [];
       let HISTORICO_PERIODO_RESUMO = null;
       let HISTORICO_PERIODO_PARAM = null;
+      let GASTOS_DATA = [];
+      let GASTOS_META = null;
+      let gastosCarregados = false;
       const $ = (id)=>document.getElementById(id);
       const fmtBR = (n)=> Number(n||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
       const onlyDigits = (s)=> String(s||'').replace(/\D/g,'');
@@ -512,6 +595,14 @@
         const d = new Date(v);
         if (isNaN(d)) return '-';
         return d.toLocaleDateString('pt-BR');
+      }
+
+      function formatInputDate(date){
+        if (!date || isNaN(date)) return '';
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
       }
 
       function clearOutputs(except){
@@ -564,6 +655,7 @@
         $('changeView').style.display='none';
         $('appView').style.display='block';
         clientesCarregados = false;
+        gastosCarregados = false;
       }
 
       // Tabs
@@ -580,7 +672,8 @@
           operacoes: 'tabOperacoes',
           dashboard: 'tabDashboard',
           clientes: 'tabClientes',
-          historico: 'tabHistorico'
+          historico: 'tabHistorico',
+          gastos: 'tabGastos'
         };
 
         const targetId = tabMapping[tab];
@@ -597,6 +690,8 @@
           if (input) {
             setTimeout(() => input.focus(), 60);
           }
+        } else if (tab === 'gastos' && !gastosCarregados) {
+          carregarGastos(true);
         }
       }
 
@@ -635,6 +730,34 @@
           historicoCpfInput.addEventListener('keydown', (ev) => {
             if (ev.key === 'Enter'){ ev.preventDefault(); buscarHistorico(); }
           });
+        }
+
+        const hoje = new Date();
+        const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+        const gastosInicio = $('gastosDataInicio');
+        const gastosFim = $('gastosDataFim');
+        if (gastosInicio) gastosInicio.value = formatInputDate(inicioMes);
+        if (gastosFim) gastosFim.value = formatInputDate(hoje);
+
+        ['gastosTipoFiltro','gastosCategoriaFiltro','gastosPessoaFiltro'].forEach(id => {
+          const el = $(id);
+          if (el){
+            el.addEventListener('change', () => { if (gastosCarregados) carregarGastos(); });
+          }
+        });
+
+        ['gastosDataInicio','gastosDataFim'].forEach(id => {
+          const el = $(id);
+          if (el){
+            el.addEventListener('change', () => { if (gastosCarregados) carregarGastos(); });
+          }
+        });
+
+        const gastosBusca = $('gastosBusca');
+        if (gastosBusca){
+          gastosBusca.addEventListener('input', debounce(() => {
+            if (gastosCarregados) carregarGastos();
+          }, 300));
         }
 
         const t = localStorage.getItem('cb_token'), u = localStorage.getItem('cb_user');
@@ -1110,6 +1233,229 @@
         const empty = $('historicoEmpty');
         if (empty) empty.style.display = 'none';
         atualizarHistoricoResumo(null);
+      }
+
+      function atualizarGastosAvisos(warnings){
+        const box = $('gastosAvisos');
+        if (!box) return;
+        const lista = (warnings || []).filter(Boolean);
+        if (!lista.length){
+          box.style.display = 'none';
+          box.innerHTML = '';
+          return;
+        }
+        box.innerHTML = lista.map(msg => `⚠️ ${msg}`).join('<br/>');
+        box.style.display = 'block';
+      }
+
+      function popularGastosFiltros(meta){
+        const categorias = (meta && Array.isArray(meta.categorias)) ? meta.categorias : [];
+        const responsaveis = (meta && Array.isArray(meta.responsaveis)) ? meta.responsaveis : [];
+
+        const catSelect = $('gastosCategoriaFiltro');
+        if (catSelect){
+          const atual = catSelect.value;
+          catSelect.innerHTML = '<option value="">Todas as categorias</option>';
+          categorias.forEach(cat => {
+            const opt = document.createElement('option');
+            opt.value = cat;
+            opt.textContent = cat;
+            catSelect.appendChild(opt);
+          });
+          if (categorias.includes(atual)) catSelect.value = atual;
+        }
+
+        const respSelect = $('gastosPessoaFiltro');
+        if (respSelect){
+          const atualResp = respSelect.value;
+          respSelect.innerHTML = '<option value="">Todos os responsáveis</option>';
+          responsaveis.forEach(resp => {
+            const opt = document.createElement('option');
+            opt.value = resp;
+            opt.textContent = resp;
+            respSelect.appendChild(opt);
+          });
+          if (responsaveis.includes(atualResp)) respSelect.value = atualResp;
+        }
+      }
+
+      function atualizarGastosResumo(meta){
+        const wrap = $('gastosResumo');
+        if (!wrap) return;
+        const qtdEl = $('gastosResumoQtd');
+        const totalEl = $('gastosResumoTotal');
+        const inicioEl = $('gastosResumoInicio');
+        const fimEl = $('gastosResumoFim');
+
+        const resumo = meta && meta.resumo ? meta.resumo : null;
+        if (!resumo || !GASTOS_DATA.length){
+          if (qtdEl) qtdEl.textContent = '0';
+          if (totalEl) totalEl.textContent = 'R$ 0,00';
+          if (inicioEl) inicioEl.textContent = '-';
+          if (fimEl) fimEl.textContent = '-';
+          wrap.style.display = 'none';
+          return;
+        }
+
+        if (qtdEl) qtdEl.textContent = resumo.quantidade || 0;
+        if (totalEl) totalEl.textContent = 'R$ ' + fmtBR(resumo.totalValor || 0);
+        if (inicioEl) inicioEl.textContent = resumo.primeiroDisplay || '-';
+        if (fimEl) fimEl.textContent = resumo.ultimoDisplay || '-';
+        wrap.style.display = 'grid';
+      }
+
+      function atualizarGastosTabela(){
+        const tbody = $('gastosTableBody');
+        const wrap = $('gastosTableWrap');
+        const empty = $('gastosEmpty');
+        if (!tbody || !wrap || !empty) return;
+
+        tbody.innerHTML = '';
+
+        GASTOS_DATA.forEach(item => {
+          const tr = document.createElement('tr');
+          const badgeClass = item.tipo === 'cartao' ? 'badge badge-gasto-cartao' : 'badge badge-gasto-debito';
+          const categoriaTexto = item.subcategoria
+            ? `${item.categoria || '-'}<div class="muted" style="font-size:11px">${item.subcategoria}</div>`
+            : (item.categoria || '-');
+
+          tr.innerHTML = `
+            <td>${item.dataDisplay || '-'}</td>
+            <td><span class="${badgeClass}">${item.tipoLabel || item.tipo || '-'}</span></td>
+            <td>${categoriaTexto}</td>
+            <td>${item.responsavel || '-'}</td>
+            <td>${item.descricao || '-'}</td>
+            <td>R$ ${fmtBR(item.valor || 0)}</td>
+            <td>${item.observacao || '-'}</td>
+            <td></td>
+          `;
+
+          const actionsTd = tr.lastElementChild;
+          if (actionsTd){
+            const excluirBtn = document.createElement('button');
+            excluirBtn.className = 'btn btn-danger btn-small';
+            excluirBtn.type = 'button';
+            excluirBtn.textContent = 'Excluir';
+            excluirBtn.addEventListener('click', () => confirmarExclusaoGasto(item));
+            actionsTd.appendChild(excluirBtn);
+          }
+
+          tbody.appendChild(tr);
+        });
+
+        if (GASTOS_DATA.length){
+          wrap.style.display = 'block';
+          empty.style.display = 'none';
+        } else {
+          wrap.style.display = 'none';
+          empty.style.display = 'block';
+        }
+      }
+
+      function carregarGastos(isInitial){
+        const btn = $('btnGastosCarregar');
+        const status = $('gastosStatus');
+        if (status) status.textContent = 'Carregando lançamentos...';
+        if (btn) btn.disabled = true;
+
+        const payload = {
+          token: TOKEN,
+          startDate: $('gastosDataInicio') ? $('gastosDataInicio').value : '',
+          endDate: $('gastosDataFim') ? $('gastosDataFim').value : '',
+          tipo: $('gastosTipoFiltro') ? $('gastosTipoFiltro').value : '',
+          categoria: $('gastosCategoriaFiltro') ? $('gastosCategoriaFiltro').value : '',
+          responsavel: $('gastosPessoaFiltro') ? $('gastosPessoaFiltro').value : '',
+          texto: $('gastosBusca') ? $('gastosBusca').value.trim() : ''
+        };
+
+        google.script.run
+          .withSuccessHandler(r => {
+            if (btn) btn.disabled = false;
+            if (!r || !r.ok){
+              if (isSessionError(r)) { forceRelog(r && r.msg ? r.msg : 'Sessão expirada.'); return; }
+              if (status) status.textContent = (r && r.msg) ? r.msg : 'Erro ao carregar lançamentos.';
+              toast((r && r.msg) ? r.msg : 'Erro ao carregar lançamentos', false);
+              return;
+            }
+
+            GASTOS_DATA = Array.isArray(r.data) ? r.data : [];
+            GASTOS_META = r.meta || null;
+            gastosCarregados = true;
+
+            popularGastosFiltros(GASTOS_META);
+            atualizarGastosAvisos(r.warnings || []);
+            atualizarGastosTabela();
+            atualizarGastosResumo(GASTOS_META);
+
+            if (status){
+              status.textContent = GASTOS_DATA.length
+                ? `Encontrados ${GASTOS_DATA.length} lançamentos.`
+                : 'Nenhum lançamento encontrado para os filtros informados.';
+            }
+          })
+          .withFailureHandler(e => {
+            if (btn) btn.disabled = false;
+            if (isSessionError(e)) { forceRelog('Sua sessão expirou.'); return; }
+            if (status) status.textContent = 'Erro ao carregar lançamentos.';
+            toast('Erro ao carregar lançamentos', false);
+          })
+          .apiGetGastos(payload);
+      }
+
+      function limparFiltrosGastos(){
+        const hoje = new Date();
+        const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+        if ($('gastosDataInicio')) $('gastosDataInicio').value = formatInputDate(inicioMes);
+        if ($('gastosDataFim')) $('gastosDataFim').value = formatInputDate(hoje);
+        if ($('gastosTipoFiltro')) $('gastosTipoFiltro').value = '';
+        if ($('gastosCategoriaFiltro')) $('gastosCategoriaFiltro').value = '';
+        if ($('gastosPessoaFiltro')) $('gastosPessoaFiltro').value = '';
+        if ($('gastosBusca')) $('gastosBusca').value = '';
+        carregarGastos();
+      }
+
+      function confirmarExclusaoGasto(item){
+        if (!item || !item.sheetName || !item.rowIndex){
+          toast('Não foi possível identificar o lançamento selecionado.', false);
+          return;
+        }
+
+        const detalhes = [
+          '<p>Tem certeza que deseja excluir?</p>',
+          item.dataDisplay ? `<p><b>Data:</b> ${item.dataDisplay}</p>` : '',
+          item.tipoLabel ? `<p><b>Origem:</b> ${item.tipoLabel}</p>` : '',
+          item.descricao ? `<p><b>Descrição:</b> ${item.descricao}</p>` : ''
+        ].join('');
+
+        openModal('Excluir lançamento', detalhes, () => excluirGasto(item));
+      }
+
+      function excluirGasto(item){
+        if (!item || !item.sheetName || !item.rowIndex){
+          toast('Não foi possível identificar o lançamento selecionado.', false);
+          return;
+        }
+
+        const status = $('gastosStatus');
+        if (status) status.textContent = 'Excluindo lançamento...';
+
+        google.script.run
+          .withSuccessHandler(r => {
+            if (!r || !r.ok){
+              if (isSessionError(r)) { forceRelog(r && r.msg ? r.msg : 'Sessão expirada.'); return; }
+              if (status) status.textContent = (r && r.msg) ? r.msg : 'Erro ao excluir lançamento.';
+              toast((r && r.msg) ? r.msg : 'Erro ao excluir lançamento', false);
+              return;
+            }
+            toast('Lançamento excluído.');
+            carregarGastos();
+          })
+          .withFailureHandler(e => {
+            if (isSessionError(e)) { forceRelog('Sua sessão expirou.'); return; }
+            if (status) status.textContent = 'Erro ao excluir lançamento.';
+            toast('Erro ao excluir lançamento', false);
+          })
+          .apiDeleteGasto({ token: TOKEN, sheetName: item.sheetName, rowIndex: item.rowIndex });
       }
 
       function confirmarCancelamentoTransacao({ rowIndex, cpf, descricao, contexto }){
